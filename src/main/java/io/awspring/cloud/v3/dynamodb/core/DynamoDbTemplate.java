@@ -27,7 +27,7 @@ import java.util.Map;
  * DynamoDbTemplate used for Entity and DynamoDb communication.
  *
  * @author Matej Nedic
- * @since 3.0.0
+ * @since 1.0.0
  */
 public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextAware, ApplicationEventPublisherAware {
 

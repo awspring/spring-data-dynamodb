@@ -26,7 +26,7 @@ import software.amazon.awssdk.regions.providers.AwsRegionProvider;
  *
  * @author Agim Emruli
  * @author Maciej Walkowiak
- * @since 1.0
+ * @since 1.0.0
  */
 public class StaticRegionProvider implements AwsRegionProvider {
 

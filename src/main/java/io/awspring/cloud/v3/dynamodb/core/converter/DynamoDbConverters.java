@@ -21,7 +21,7 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
  * Wrapper class to contain useful converters for the usage with DynamoDb.
  *
  * @author Matej Nedic
- * @since 3.0
+ * @since 1.0.0
  */
 public class DynamoDbConverters {
 

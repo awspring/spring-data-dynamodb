@@ -19,7 +19,7 @@ import java.util.Map;
  *
  * @author Matej Nedic
  * @see DynamoDbTemplate
- * @since 3.0
+ * @since 1.0.0
  */
 public class EntityOperations {
 

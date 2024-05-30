@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Configuration properties for the AWS DynamoDB integration
  *
  * @author Matej Nedic
- * @since 3.0.0
+ * @since 1.0.0
  */
 @ConfigurationProperties(DynamoDbProperties.CONFIG_PREFIX)
 public class DynamoDbProperties extends AwsClientProperties {
