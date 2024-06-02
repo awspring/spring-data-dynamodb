@@ -14,7 +14,7 @@ public class OrderSK extends Order {
     public OrderSK() {
     }
 
-    public OrderSK(String username, UUID orderId, String status, LocalDate createdAt, Address address, String globalSortKey) {
+    public OrderSK(String username, UUID orderId, Status status, LocalDate createdAt, Address address, String globalSortKey) {
         super(username, orderId, status, createdAt, address);
         this.globalSortKey = globalSortKey;
     }

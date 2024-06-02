@@ -123,7 +123,7 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         //Prepare Objects 1 Order 1 Account on same Address
         Address address = new Address("Zagreb", 10000L, "Trg bana Josipa Jelacica", "Hrvatska");
         LocalDate date = LocalDate.now();
-        OrderSK order = new OrderSK("myUser", UUID.randomUUID(), "SHIPPED", date, address, "SOME#123512512");
+        OrderSK order = new OrderSK("myUser", UUID.randomUUID(), Status.SHIPPED, date, address, "SOME#123512512");
         PersonInformation personInformation = new PersonInformation("myUser", "Josip Jelacic", "fake_email", date, address);
         ShopTable shopTable1 = new ShopTable("USER#myUser", "USER#myUser", null, personInformation);
         ShopTable shopTable2 = new ShopTable("USER#myUser", "ORDER#15236", order, null);

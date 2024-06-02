@@ -297,15 +297,15 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
             attributeValue.m().forEach((key, value) -> {
 
             });
-        } else if (serializeAsJson) {
+        }  else if (conversionService.canConvert(AttributeValue.class, type)) {
+            return this.conversionService.convert(attributeValue, type);
+        }
+        else if (serializeAsJson || Enum.class.isAssignableFrom(type)) {
             try {
                 return objectMapper.readValue(attributeValue.s(), type);
             } catch (JsonProcessingException e) {
                 throw new UnsupportedOperationException("Cannot convert value: " + attributeValue, e);
             }
-        }
-        else if (conversionService.canConvert(AttributeValue.class, type)) {
-            return this.conversionService.convert(attributeValue, type);
         }
         return null;
     }

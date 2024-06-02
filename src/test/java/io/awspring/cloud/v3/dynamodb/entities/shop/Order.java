@@ -12,7 +12,7 @@ public class Order {
 
     private String username;
     private UUID orderId;
-    private String status;
+    private Status status;
     private LocalDate createdAt;
 
     @InnerClass(serializeAsJson = true)
@@ -21,7 +21,7 @@ public class Order {
     public Order() {
     }
 
-    public Order(String username, UUID orderId, String status, LocalDate createdAt, Address address) {
+    public Order(String username, UUID orderId, Status status, LocalDate createdAt, Address address) {
         this.username = username;
         this.orderId = orderId;
         this.status = status;
@@ -45,11 +45,11 @@ public class Order {
         this.orderId = orderId;
     }
 
-    public String getStatus() {
+    public Status getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(Status status) {
         this.status = status;
     }
 
