@@ -1,15 +1,15 @@
 package io.awspring.cloud.v3.dynamodb.repository.cdi;
 
 import io.awspring.cloud.v3.dynamodb.core.DynamoDbOperations;
+import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.UnsatisfiedResolutionException;
+import jakarta.enterprise.inject.spi.AfterBeanDiscovery;
+import jakarta.enterprise.inject.spi.Bean;
+import jakarta.enterprise.inject.spi.BeanManager;
+import jakarta.enterprise.inject.spi.ProcessBean;
 import org.springframework.data.repository.cdi.CdiRepositoryBean;
 import org.springframework.data.repository.cdi.CdiRepositoryExtensionSupport;
 
-import javax.enterprise.event.Observes;
-import javax.enterprise.inject.UnsatisfiedResolutionException;
-import javax.enterprise.inject.spi.AfterBeanDiscovery;
-import javax.enterprise.inject.spi.Bean;
-import javax.enterprise.inject.spi.BeanManager;
-import javax.enterprise.inject.spi.ProcessBean;
 import java.lang.annotation.Annotation;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,11 +44,11 @@ public class DynamoDbRepositoryExtension extends CdiRepositoryExtensionSupport {
 	private <T> CdiRepositoryBean<T> createRepositoryBean(Class<T> repositoryType, Set<Annotation> qualifiers,
 														  BeanManager beanManager) {
 
-		Bean<DynamoDbOperations> cassandraOperationsBean = Optional.ofNullable(this.dynamoDbOperationsMap.get(qualifiers))
+		Bean<DynamoDbOperations> dynamoDbOperationsBean = Optional.ofNullable(this.dynamoDbOperationsMap.get(qualifiers))
 			.orElseThrow(() -> new UnsatisfiedResolutionException(String.format(
 				"Unable to resolve a bean for '%s' with qualifiers %s.", DynamoDbOperations.class.getName(), qualifiers)));
 
-		return new DynamoDbRepositoryBean<>(cassandraOperationsBean, qualifiers, repositoryType, beanManager,
+		return new DynamoDbRepositoryBean<>(dynamoDbOperationsBean, qualifiers, repositoryType, beanManager,
 			getCustomImplementationDetector());
 	}
 }

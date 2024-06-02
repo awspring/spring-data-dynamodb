@@ -1,11 +1,11 @@
 package io.awspring.cloud.v3.dynamodb.repository.cdi;
 
-import javax.enterprise.context.spi.CreationalContext;
-import javax.enterprise.inject.spi.Bean;
-import javax.enterprise.inject.spi.BeanManager;
 
 import io.awspring.cloud.v3.dynamodb.core.DynamoDbOperations;
 import io.awspring.cloud.v3.dynamodb.repository.DynamoDbRepositoryFactory;
+import jakarta.enterprise.context.spi.CreationalContext;
+import jakarta.enterprise.inject.spi.Bean;
+import jakarta.enterprise.inject.spi.BeanManager;
 import org.springframework.data.repository.cdi.CdiRepositoryBean;
 import org.springframework.data.repository.config.CustomRepositoryImplementationDetector;
 import org.springframework.lang.Nullable;
@@ -20,7 +20,7 @@ public class DynamoDbRepositoryBean<T> extends CdiRepositoryBean<T> {
 	private final Bean<DynamoDbOperations> dynamoDbOperationsBean;
 
 	public DynamoDbRepositoryBean(Bean<DynamoDbOperations> operations, Set<Annotation> qualifiers,
-								   Class<T> repositoryType, BeanManager beanManager, @Nullable CustomRepositoryImplementationDetector detector) {
+								  Class<T> repositoryType, BeanManager beanManager, @Nullable CustomRepositoryImplementationDetector detector) {
 		super(qualifiers, repositoryType, beanManager, Optional.ofNullable(detector));
 
 		Assert.notNull(operations, "Cannot create repository with 'null' for DynamoDbOperations.");
