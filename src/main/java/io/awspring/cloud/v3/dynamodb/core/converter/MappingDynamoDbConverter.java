@@ -9,10 +9,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.core.convert.support.DefaultConversionService;
-import org.springframework.data.mapping.MappingException;
-import org.springframework.data.mapping.PersistentProperty;
-import org.springframework.data.mapping.PersistentPropertyAccessor;
-import org.springframework.data.mapping.PreferredConstructor;
+import org.springframework.data.mapping.*;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.mapping.model.ConvertingPropertyAccessor;
 import org.springframework.data.mapping.model.EntityInstantiator;
@@ -350,7 +347,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         INSTANCE;
 
         @Override
-        public <T> T getParameterValue(PreferredConstructor.Parameter<T, DynamoDbPersistentProperty> parameter) {
+        public <T> T getParameterValue(Parameter<T, DynamoDbPersistentProperty> parameter) {
             return null;
         }
     }

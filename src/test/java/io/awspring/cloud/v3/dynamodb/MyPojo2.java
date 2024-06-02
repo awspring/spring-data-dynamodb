@@ -12,13 +12,13 @@ public class MyPojo2 {
 
     @Column("telephoneNumber")
     public String telephoneNumber;
-    public BigDecimal bill;
+    public Long bill;
     public List<String> ownerFacts;
     public HashMap<String, List<String>> ownerInformations;
 
     MyPojo2() {
         telephoneNumber = "09";
-        bill = BigDecimal.ONE;
+        bill = 1L;
         ownerFacts = Collections.singletonList("dva");
         ownerInformations = new HashMap<>();
     }
@@ -40,11 +40,11 @@ public class MyPojo2 {
         this.telephoneNumber = telephoneNumber;
     }
 
-    public BigDecimal getBill() {
+    public Long getBill() {
         return bill;
     }
 
-    public void setBill(BigDecimal bill) {
+    public void setBill(Long bill) {
         this.bill = bill;
     }
 
