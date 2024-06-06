@@ -135,7 +135,6 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         // Read all accounts and Order with 1 Query
         EntityReadResult<List<ShopTable>> sqlTypeQueryResult = dynamoDbTemplate.executeStatement("Select * from shop", null, ShopTable.class);
 
-
         // Read with proper way
         DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.aDynamoDBQueryRequest().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
         EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, null);

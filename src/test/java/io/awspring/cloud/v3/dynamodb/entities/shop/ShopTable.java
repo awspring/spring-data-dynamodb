@@ -7,18 +7,15 @@ import io.awspring.cloud.v3.dynamodb.core.mapping.Table;
 
 import java.util.Objects;
 
-@Table("shop")
+@Table(tableName = "shop")
 public class ShopTable {
-
     @PartitionKey
     private String partitionKey;
     @SortKey
     private String sortKey;
-
-    @InnerClass(regex = "ORDER")
+    @InnerClass(startsWith = "ORDER")
     private OrderSK order;
-
-    @InnerClass(regex = "USER")
+    @InnerClass(startsWith = "USER")
     private PersonInformation personInformation;
 
     public ShopTable() {

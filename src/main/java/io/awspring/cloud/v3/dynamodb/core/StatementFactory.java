@@ -2,10 +2,7 @@ package io.awspring.cloud.v3.dynamodb.core;
 
 import io.awspring.cloud.v3.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.cloud.v3.dynamodb.core.mapping.DynamoDbPersistenceEntity;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBConditionRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBPageRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBQueryRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBUpdateExpressionRequest;
+import io.awspring.cloud.v3.dynamodb.request.*;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.util.Assert;
@@ -62,6 +59,7 @@ public class StatementFactory {
 		if (dynamoDBConditionRequest.getExpressionAttributeValues() != null) {
 			Map<String, AttributeValue> expressionAttributesToBuild = new HashMap<>(dynamoDBConditionRequest.getExpressionAttributeValues().size());
 			dynamoDBConditionRequest.getExpressionAttributeValues().forEach((k, v) -> expressionAttributesToBuild.put(k, dynamoDbConverter.convertToDynamoDbType(v, persistentEntity)));
+			builder.expressionAttributeValues(expressionAttributesToBuild);
 		}
 
 
@@ -111,6 +109,7 @@ public class StatementFactory {
 		if (dynamoDBConditionRequest.getExpressionAttributeValues() != null) {
 			Map<String, AttributeValue> expressionAttributesToBuild = new HashMap<>(dynamoDBConditionRequest.getExpressionAttributeValues().size());
 			dynamoDBConditionRequest.getExpressionAttributeValues().forEach((k, v) -> expressionAttributesToBuild.put(k, dynamoDbConverter.convertToDynamoDbType(v, requiredPersistentEntity)));
+			deleteItemRequestBuilder.expressionAttributeValues(expressionAttributesToBuild);
 		}
 
 
@@ -183,8 +182,10 @@ public class StatementFactory {
 			dynamoDBPageRequest.getLastEvaluatedKey().forEach((k, v) -> {
 				exclusiveStartKeys.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity));
 			});
-			queryRequestBuilder.limit(dynamoDBPageRequest.getLimit()).exclusiveStartKey(exclusiveStartKeys);
+			queryRequestBuilder.exclusiveStartKey(exclusiveStartKeys);
 		}
+
+		queryRequestBuilder.limit(dynamoDBPageRequest.getLimit());
 
 		queryRequestBuilder.consistentRead(qr.getConsistentRead()).scanIndexForward(qr.getScanIndexForward());
 		if (qr.getExpressionAttributeNames() != null) {
@@ -231,7 +232,43 @@ public class StatementFactory {
 		if (request.getExpressionAttributeValues() != null) {
 			Map<String, AttributeValue> expressionAttributesToBuild = new HashMap<>(request.getExpressionAttributeValues().size());
 			request.getExpressionAttributeValues().forEach((k, v) -> expressionAttributesToBuild.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity)));
+			builder.expressionAttributeValues(expressionAttributesToBuild);
 		}
 		return builder.build();
 	}
+
+    public ScanRequest scan(String tableName, DynamoDbScanRequest request, DynamoDbPersistenceEntity<?> entity) {
+		var builder = ScanRequest.builder();
+		builder.consistentRead(request.isConsistentRead());
+		builder.tableName(tableName);
+		if (request.getIndexName() != null) {
+			builder.indexName(request.getIndexName());
+		}
+		if (request.getLimit() != null) {
+			builder.limit(request.getLimit());
+		}
+		if (request.getExpressionAttributeNames() != null) {
+			builder.expressionAttributeNames(request.getExpressionAttributeNames());
+		}
+		if (request.getExpressionAttributeValues() != null) {
+			Map<String, AttributeValue> expressionAttributesToBuild = new HashMap<>(request.getExpressionAttributeValues().size());
+			request.getExpressionAttributeValues().forEach((k, v) -> expressionAttributesToBuild.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity)));
+			builder.expressionAttributeValues(expressionAttributesToBuild);
+		}
+		if (request.getFilterExpression() != null) {
+			builder.filterExpression(request.getFilterExpression());
+		}
+		if (request.getExclusiveStartKey() != null) {
+			Map<String, AttributeValue> exclusiveKey = new HashMap<>(request.getExclusiveStartKey().size());
+			request.getExclusiveStartKey().forEach((k, v) -> exclusiveKey.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity)));
+			builder.exclusiveStartKey(exclusiveKey);
+		}
+		if (request.getSelect() != null) {
+			builder.select(request.getSelect());
+		}
+		if (request.getProjectionExpression() != null ) {
+			builder.projectionExpression(request.getProjectionExpression());
+		}
+		return builder.build();
+    }
 }

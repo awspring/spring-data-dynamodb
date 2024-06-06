@@ -24,6 +24,8 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
     private DynamoDbPersistentEntityMetadataVerifier verifier = DEFAULT_VERIFIER;
 
     public String tableName;
+
+    public String globalSecondaryIndex;
     private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
 
     public BasicDynamoDbPersistenceEntity(TypeInformation<T> typeInformation, DynamoDbPersistentEntityMetadataVerifier verifier) {
@@ -40,10 +42,21 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
     private String determineTableName() {
         Table annotation = findAnnotation(Table.class);
 
-        if (annotation != null && StringUtils.hasText(annotation.value())) {
-            return annotation.value();
+        if (annotation != null && StringUtils.hasText(annotation.tableName())) {
+            return annotation.tableName();
         }
         return namingStrategy.getTableName(this);
+    }
+
+
+    @Nullable
+    private String determineGlobalSecondaryIndex() {
+        Table annotation = findAnnotation(Table.class);
+
+        if (annotation != null && StringUtils.hasText(annotation.globalSecondaryIndexName())) {
+            return annotation.globalSecondaryIndexName();
+        }
+        return null;
     }
 
 
@@ -74,6 +87,11 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
     @Override
     public String getTableName() {
         return Optional.ofNullable(this.tableName).orElseGet(this::determineTableName);
+    }
+
+    @Override
+    public String getGlobalSecondaryIndex() {
+        return Optional.ofNullable(this.globalSecondaryIndex).orElseGet(this::determineGlobalSecondaryIndex);
     }
 
     @Override

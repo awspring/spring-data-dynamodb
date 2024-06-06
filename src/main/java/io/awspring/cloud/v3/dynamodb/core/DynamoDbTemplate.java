@@ -3,10 +3,7 @@ package io.awspring.cloud.v3.dynamodb.core;
 import io.awspring.cloud.v3.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.cloud.v3.dynamodb.core.mapping.DynamoDbPersistenceEntity;
 import io.awspring.cloud.v3.dynamodb.core.mapping.events.*;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBConditionRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBPageRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBQueryRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBUpdateExpressionRequest;
+import io.awspring.cloud.v3.dynamodb.request.*;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -48,7 +45,7 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	}
 
 	@Override
-	public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+	public void setApplicationContext(@Nullable ApplicationContext applicationContext) throws BeansException {
 		if (entityCallbacks == null) {
 			setEntityCallbacks(EntityCallbacks.create(applicationContext));
 		}
@@ -126,8 +123,7 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	private <T> PutRequest doSaveAll(T entity, String tableName) {
 		EntityOperations.AdaptibleEntity<T> source = getEntityOperations().forEntity(entity, getConverter().getConversionService());
 		T entityToSave = maybeCallBeforeSave(entity, tableName);
-		PutRequest request = statementFactory.insertAll(entityToSave, source.getPersistentEntity());
-		return request;
+        return statementFactory.insertAll(entityToSave, source.getPersistentEntity());
 	}
 
 	@Override
@@ -164,8 +160,8 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 
 	@Override
 	public <T> void delete(Class<T> entityClass, Map<String, Object> keys, DynamoDBConditionRequest dynamoDBConditionRequest) {
-		String tableName = getTableName(entityClass.getClass());
-		DeleteItemRequest request = statementFactory.delete(keys, getRequiredPersistentEntity(entityClass.getClass()), tableName, dynamoDBConditionRequest);
+		String tableName = getTableName(entityClass);
+		DeleteItemRequest request = statementFactory.delete(keys, getRequiredPersistentEntity(entityClass), tableName, dynamoDBConditionRequest);
 		maybeEmitEvent(new DynamoDbBeforeDeleteEvent<>(entityClass, tableName));
 		dynamoDbClient.deleteItem(request);
 		maybeEmitEvent(new DynamoDbAfterDeleteEvent<>(entityClass, tableName));
@@ -190,7 +186,25 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 					}
 				}
 		);
-		return EntityQueryResult.of(listToBeReturned, Long.valueOf(queryResponse.count().longValue()));
+		return EntityQueryResult.of(listToBeReturned, queryResponse.count().longValue());
+	}
+
+
+	public <T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
+		String tableName = getTableName(entityClass.getClass());
+		DynamoDbPersistenceEntity basicDynamoDbPersistenceEntity = getRequiredPersistentEntity(entityClass);
+		var scan = statementFactory.scan(tableName, scanRequest, basicDynamoDbPersistenceEntity);
+		ScanResponse scanResponse = dynamoDbClient.scan(scan);
+		List<T> listToBeReturned = new ArrayList<>(scanResponse.items().size());
+		scanResponse.items().forEach(item ->
+				{
+					if (item != null) {
+						listToBeReturned.add(converter.read(entityClass, item));
+					}
+				}
+		);
+		return EntityQueryResult.of(listToBeReturned, scanResponse.count().longValue());
+
 	}
 
 	@Override
@@ -222,8 +236,8 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 		return EntityReadResult.of(listToBeReturned, executeStatementResponse.nextToken());
 	}
 
+	@Override
 	public <T> EntityWriteResult<T> update(T entity) {
-
 		String tableName = getTableName(entity.getClass());
 		DynamoDbPersistenceEntity dynamoDbPersistenceEntity = getRequiredPersistentEntity(entity.getClass());
 		UpdateItemRequest updateItemRequest = statementFactory.update(entity, tableName, dynamoDbPersistenceEntity);
@@ -242,7 +256,6 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 		UpdateItemResponse updateItemResponse = dynamoDbClient.updateItem(updateItemRequest);
 		maybeEmitEvent(new DynamoDbAfterUpdateEvent<>(entityClass, tableName));
 		return EntityWriteResult.of(updateItemResponse.attributes(), converter.read(entityClass, updateItemResponse.attributes()));
-
 	}
 
 	public String getTableName(Class<?> entityClass) {

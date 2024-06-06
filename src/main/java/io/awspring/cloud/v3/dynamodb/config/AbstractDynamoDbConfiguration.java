@@ -11,6 +11,7 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanClassLoaderAware;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.convert.CustomConversions;
 import org.springframework.lang.NonNull;
@@ -42,6 +43,11 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
     @Bean
     public DynamoDbTemplate dynamoDbTemplate(DynamoDbClient dynamoDbClient, DynamoDbConverter dynamoDbConverter) {
         return new DynamoDbTemplate(dynamoDbClient, dynamoDbConverter);
+    }
+
+    @Bean
+    public DynamoDbClient dynamoDbClient() {
+        return DynamoDbClient.builder().build();
     }
 
     @Bean

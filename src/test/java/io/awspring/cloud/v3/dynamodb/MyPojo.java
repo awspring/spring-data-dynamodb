@@ -3,7 +3,7 @@ package io.awspring.cloud.v3.dynamodb;
 import io.awspring.cloud.v3.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.v3.dynamodb.core.mapping.Table;
 
-@Table("myPojo")
+@Table(tableName = "myPojo")
 public class MyPojo {
 
     @PartitionKey

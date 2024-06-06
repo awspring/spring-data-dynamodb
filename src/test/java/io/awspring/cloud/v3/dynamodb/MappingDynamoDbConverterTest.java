@@ -40,7 +40,7 @@ public class MappingDynamoDbConverterTest {
 		Assertions.assertEquals(mapToBeChecked.get("myList").l().size(),2);
 	}
 
-	@Table("someTableName")
+	@Table(tableName = "someTableName")
 	public static class NewClassTest {
 		@PartitionKey
 		private String id;
@@ -71,7 +71,7 @@ public class MappingDynamoDbConverterTest {
 	}
 
 
-	@Table("someTableName")
+	@Table(tableName = "someTableName")
 	public static class TestClass {
 
 		@PartitionKey

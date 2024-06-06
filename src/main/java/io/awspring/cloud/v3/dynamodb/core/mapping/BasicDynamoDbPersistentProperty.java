@@ -75,6 +75,11 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 			Column column = findAnnotation(Column.class);
 			if (column != null) {
 				overriddenName = column.value();
+			} else {
+				var sortKey = findAnnotation(SortKey.class);
+				if (sortKey != null) {
+					overriddenName = sortKey.value();
+				}
 			}
 		}
 

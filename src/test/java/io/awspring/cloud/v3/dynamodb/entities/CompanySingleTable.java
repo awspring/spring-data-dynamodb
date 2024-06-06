@@ -5,7 +5,7 @@ import io.awspring.cloud.v3.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.v3.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.v3.dynamodb.core.mapping.Table;
 
-@Table("company_table")
+@Table(tableName = "company_table")
 public class CompanySingleTable {
     @PartitionKey
     private String partitionKey;

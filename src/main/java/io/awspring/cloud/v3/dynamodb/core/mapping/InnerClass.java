@@ -8,7 +8,7 @@ import java.lang.annotation.*;
 @Target({ElementType.FIELD})
 public @interface InnerClass {
 
-    String regex() default "";
+    String startsWith() default "";
 
     boolean serializeAsJson() default false;
 }

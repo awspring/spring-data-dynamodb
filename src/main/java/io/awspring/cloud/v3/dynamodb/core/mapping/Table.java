@@ -11,5 +11,7 @@ import java.lang.annotation.*;
 @Target({ ElementType.TYPE })
 public @interface Table {
 
-	String value() default "";
+	String tableName() default "";
+
+	String globalSecondaryIndexName() default "";
 }

@@ -30,7 +30,7 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 					Type t = ((ParameterizedType) ty).getActualTypeArguments()[0];
 					this.typeOfProperty = Class.forName(((Class) t).getName());
 				} else if (property.getField().get().isAnnotationPresent(InnerClass.class)) {
-					regex = property.getField().get().getAnnotation(InnerClass.class).regex();
+					regex = property.getField().get().getAnnotation(InnerClass.class).startsWith();
 					serializeAsJson = property.getField().get().getAnnotation(InnerClass.class).serializeAsJson();
 					this.typeOfProperty = Class.forName(((Class) ty).getName());
 					this.isSpecialType = true;

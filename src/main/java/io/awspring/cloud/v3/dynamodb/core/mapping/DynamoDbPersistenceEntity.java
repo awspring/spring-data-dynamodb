@@ -6,4 +6,6 @@ public interface DynamoDbPersistenceEntity<T> extends PersistentEntity<T, Dynamo
 
 	String getTableName();
 
+	String getGlobalSecondaryIndex();
+
 }
