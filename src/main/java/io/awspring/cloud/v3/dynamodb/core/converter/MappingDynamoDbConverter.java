@@ -162,12 +162,12 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
 
         for (DynamoDbPersistentProperty property : entity) {
             if (property.isSpecialType() && !property.serializeAsJson()) {
-                if (rangeKey != null && property.sortKeyRegex() != null && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().startsWith(property.sortKeyRegex()))) {
+                if (rangeKey != null && (startsWith(source, rangeKey, property) || endsWith(source, rangeKey, property))) {
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
                     flag = true;
-                } else if (rangeKey == null || property.sortKeyRegex() == null  && !flag) {
+                } else if (rangeKey == null || property.startsWith() == null  && !flag) {
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
@@ -179,6 +179,13 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         return instance;
     }
 
+    private boolean endsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
+        return property.endsWith() != null && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith()));
+    }
+
+    private static boolean startsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
+        return property.startsWith() != null && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith()));
+    }
 
 
     private <S> ConvertingPropertyAccessor<S> newConvertingPropertyAccessor(S source,

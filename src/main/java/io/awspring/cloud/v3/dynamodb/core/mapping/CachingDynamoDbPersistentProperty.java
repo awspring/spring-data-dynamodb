@@ -12,7 +12,9 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 	private final boolean isEmbedded;
 	private Class typeOfProperty;
 
-	private String regex;
+	private String startsWith;
+
+	private String endsWith;
 
 	private boolean serializeAsJson = false;
 
@@ -30,7 +32,8 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 					Type t = ((ParameterizedType) ty).getActualTypeArguments()[0];
 					this.typeOfProperty = Class.forName(((Class) t).getName());
 				} else if (property.getField().get().isAnnotationPresent(InnerClass.class)) {
-					regex = property.getField().get().getAnnotation(InnerClass.class).startsWith();
+					startsWith = property.getField().get().getAnnotation(InnerClass.class).startsWith();
+					endsWith = property.getField().get().getAnnotation(InnerClass.class).endsWith();
 					serializeAsJson = property.getField().get().getAnnotation(InnerClass.class).serializeAsJson();
 					this.typeOfProperty = Class.forName(((Class) ty).getName());
 					this.isSpecialType = true;
@@ -45,8 +48,13 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 	}
 
 	@Override
-	public String  sortKeyRegex(){
-		return this.regex;
+	public String startsWith(){
+		return this.startsWith;
+	}
+
+	@Override
+	public String endsWith(){
+		return this.endsWith;
 	}
 	@Override
 	public boolean isEmbedded() {

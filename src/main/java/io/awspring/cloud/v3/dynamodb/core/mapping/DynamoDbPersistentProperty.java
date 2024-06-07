@@ -32,7 +32,9 @@ public interface DynamoDbPersistentProperty	extends PersistentProperty<DynamoDbP
 
 	 Class getTypeOfProperty();
 
-	 String sortKeyRegex();
+	 String startsWith();
+
+	 String endsWith();
 
 	 boolean serializeAsJson();
 }
