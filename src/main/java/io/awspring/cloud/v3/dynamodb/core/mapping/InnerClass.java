@@ -10,5 +10,7 @@ public @interface InnerClass {
 
     String startsWith() default "";
 
+    String endsWith() default "";
+
     boolean serializeAsJson() default false;
 }

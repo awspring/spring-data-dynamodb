@@ -146,9 +146,15 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 	}
 
 	@Override
-	public String sortKeyRegex() {
+	public String startsWith() {
 		return null;
 	}
+
+	@Override
+	public String endsWith() {
+		return null;
+	}
+
 
 	@Override
 	public boolean serializeAsJson() {
