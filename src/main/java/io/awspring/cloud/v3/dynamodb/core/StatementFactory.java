@@ -29,16 +29,6 @@ public class StatementFactory {
 	}
 
 
-	public PutItemRequest insert(Object objectToInsert) {
-
-		Assert.notNull(objectToInsert, "Object to builder must not be null");
-
-		DynamoDbPersistenceEntity<?> persistentEntity = dynamoDbConverter.getMappingContext()
-			.getRequiredPersistentEntity(objectToInsert.getClass());
-
-		return insert(objectToInsert, persistentEntity, persistentEntity.getTableName(), new DynamoDBConditionRequest());
-	}
-
 	PutItemRequest insert(Object objectToInsert,
 						  DynamoDbPersistenceEntity<?> persistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
 
@@ -198,6 +188,9 @@ public class StatementFactory {
 			});
 			queryRequestBuilder.expressionAttributeValues(mapOfExpressionAttributeValues);
 		}
+		if (StringUtils.hasText(entity.getGlobalSecondaryIndex())) {
+			queryRequestBuilder.indexName(entity.getGlobalSecondaryIndex());
+		}
 		if (StringUtils.hasLength(qr.getIndexName())) {
 			queryRequestBuilder.indexName(qr.getIndexName());
 		}
@@ -241,6 +234,9 @@ public class StatementFactory {
 		var builder = ScanRequest.builder();
 		builder.consistentRead(request.isConsistentRead());
 		builder.tableName(tableName);
+		if (StringUtils.hasText(entity.getGlobalSecondaryIndex())) {
+			builder.indexName(entity.getGlobalSecondaryIndex());
+		}
 		if (request.getIndexName() != null) {
 			builder.indexName(request.getIndexName());
 		}

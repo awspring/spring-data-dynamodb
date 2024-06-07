@@ -189,7 +189,7 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 		return EntityQueryResult.of(listToBeReturned, queryResponse.count().longValue());
 	}
 
-
+	@Override
 	public <T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
 		String tableName = getTableName(entityClass.getClass());
 		DynamoDbPersistenceEntity basicDynamoDbPersistenceEntity = getRequiredPersistentEntity(entityClass);
