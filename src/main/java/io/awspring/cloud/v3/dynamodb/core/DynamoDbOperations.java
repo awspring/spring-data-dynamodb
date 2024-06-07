@@ -1,10 +1,7 @@
 package io.awspring.cloud.v3.dynamodb.core;
 
 import io.awspring.cloud.v3.dynamodb.core.converter.DynamoDbConverter;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBConditionRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBPageRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBQueryRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBUpdateExpressionRequest;
+import io.awspring.cloud.v3.dynamodb.request.*;
 
 import java.util.List;
 import java.util.Map;
@@ -34,4 +31,5 @@ public interface DynamoDbOperations {
 
 	<T> EntityWriteResult<T> update(T entity);
 	<T> EntityWriteResult<T> update(Map<String, Object> keys, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass);
+	<T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest);
 }
