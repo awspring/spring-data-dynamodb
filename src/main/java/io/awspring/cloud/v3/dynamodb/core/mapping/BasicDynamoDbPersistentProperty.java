@@ -30,10 +30,8 @@ import java.util.function.Supplier;
 
 public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentProperty<DynamoDbPersistentProperty>
         implements DynamoDbPersistentProperty, ApplicationContextAware {
-    private static final Class<? extends Annotation> IDENTITY_TYPE = loadIdentityType();
     private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
-    private final Lazy<Boolean> isSortKey = Lazy
-            .of(() -> isAnnotationPresent(SortKey.class) || IDENTITY_TYPE != null && isAnnotationPresent(IDENTITY_TYPE));
+    private final Lazy<Boolean> isSortKey = Lazy.of(() -> isAnnotationPresent(SortKey.class));
     private String columnName;
 
     private @Nullable StandardEvaluationContext spelContext;
