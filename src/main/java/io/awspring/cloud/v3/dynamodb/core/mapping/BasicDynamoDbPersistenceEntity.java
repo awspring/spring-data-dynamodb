@@ -6,11 +6,13 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.expression.BeanFactoryAccessor;
 import org.springframework.context.expression.BeanFactoryResolver;
 import org.springframework.data.mapping.MappingException;
+import org.springframework.data.mapping.PersistentProperty;
 import org.springframework.data.mapping.model.BasicPersistentEntity;
 import org.springframework.data.util.TypeInformation;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
+import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
@@ -24,6 +26,7 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
     private DynamoDbPersistentEntityMetadataVerifier verifier = DEFAULT_VERIFIER;
 
     public String tableName;
+    private @Nullable DynamoDbPersistentProperty sortKey;
 
     public String globalSecondaryIndex;
     private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
@@ -34,6 +37,7 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
 
         setVerifier(verifier);
     }
+
 
     public BasicDynamoDbPersistenceEntity(TypeInformation<T> information, Comparator<DynamoDbPersistentProperty> comparator) {
         super(information, comparator);
@@ -110,5 +114,19 @@ public class BasicDynamoDbPersistenceEntity<T> extends BasicPersistentEntity<T, 
 
     public void setNamingStrategy(NamingStrategy namingStrategy) {
         this.namingStrategy = namingStrategy;
+    }
+
+    @Override
+    public void addPersistentProperty(DynamoDbPersistentProperty property) {
+        super.addPersistentProperty(property);
+        if (property.isSortKey()) {
+            this.sortKey = property;
+        }
+    }
+
+    @Override
+    @Nullable
+    public DynamoDbPersistentProperty getSortKey() {
+        return sortKey;
     }
 }

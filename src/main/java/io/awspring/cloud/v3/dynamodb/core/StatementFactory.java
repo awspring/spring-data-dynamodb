@@ -5,6 +5,7 @@ import io.awspring.cloud.v3.dynamodb.core.mapping.DynamoDbPersistenceEntity;
 import io.awspring.cloud.v3.dynamodb.request.*;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -21,15 +22,12 @@ public class StatementFactory {
 
 	private final DynamoDbConverter dynamoDbConverter;
 
-
-	private final ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
-
 	public StatementFactory(DynamoDbConverter dynamoDbConverter) {
 		this.dynamoDbConverter = dynamoDbConverter;
 	}
 
 
-	PutItemRequest insert(Object objectToInsert,
+	public PutItemRequest insert(Object objectToInsert,
 						  DynamoDbPersistenceEntity<?> persistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
 
 		Assert.notNull(tableName, "TableName must not be null");
@@ -56,7 +54,7 @@ public class StatementFactory {
 		return builder.build();
 	}
 
-	PutRequest insertAll(Object objectToInsert,
+	public PutRequest insertAll(Object objectToInsert,
 						 DynamoDbPersistenceEntity<?> persistentEntity) {
 
 		Assert.notNull(objectToInsert, "Object to insert must not be null");
@@ -69,7 +67,7 @@ public class StatementFactory {
 		return PutRequest.builder().item(object).build();
 	}
 
-	DeleteItemRequest delete(Object objectToDelete, DynamoDbPersistenceEntity persistenceEntity, String tableName) {
+	public DeleteItemRequest delete(Object objectToDelete, DynamoDbPersistenceEntity persistenceEntity, String tableName) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(objectToDelete, "Object to delete must not be null");
 		Assert.notNull(persistenceEntity, "DynamoDbPersistenceEntity must not be null");
@@ -80,15 +78,16 @@ public class StatementFactory {
 		return DeleteItemRequest.builder().tableName(tableName).key(keys).build();
 	}
 
-	DeleteItemRequest delete(Map<String, Object> keys, DynamoDbPersistenceEntity<?> requiredPersistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
+	public DeleteItemRequest delete(Object partitionKey, @Nullable Object sortKey, DynamoDbPersistenceEntity<?> requiredPersistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
 		Assert.notNull(tableName, "TableName must not be null");
-		Assert.notNull(keys, "Keys to delete must not be null");
+		Assert.notNull(partitionKey, "Partition key must not be null");
 		Assert.notNull(requiredPersistentEntity, "DynamoDbPersistenceEntity must not be null");
 
-		Map<String, AttributeValue> keysToBeUsed = new LinkedHashMap<>(keys.size());
-		keys.forEach((k, v) -> {
-			keysToBeUsed.put(k, dynamoDbConverter.convertToDynamoDbType(v, requiredPersistentEntity));
-		});
+		Map<String, AttributeValue> keysToBeUsed = new LinkedHashMap<>(2);
+		keysToBeUsed.put(requiredPersistentEntity.getIdProperty().getColumnName(), dynamoDbConverter.convertToDynamoDbType(partitionKey, requiredPersistentEntity));
+		if (sortKey != null) {
+			keysToBeUsed.put(requiredPersistentEntity.getSortKey().getColumnName(), dynamoDbConverter.convertToDynamoDbType(sortKey, requiredPersistentEntity));
+		}
 		DeleteItemRequest.Builder deleteItemRequestBuilder = DeleteItemRequest.builder().tableName(tableName).key(keysToBeUsed);
 		if (dynamoDBConditionRequest.getConditionExpression() != null) {
 			deleteItemRequestBuilder.conditionExpression(dynamoDBConditionRequest.getConditionExpression());
@@ -106,7 +105,7 @@ public class StatementFactory {
 		return deleteItemRequestBuilder.build();
 	}
 
-	GetItemRequest findByKey(Object key, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
+	public GetItemRequest findByKey(Object key, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(key, "Key must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
@@ -117,11 +116,10 @@ public class StatementFactory {
 	}
 
 
-	ExecuteStatementRequest executeStatementRequest(String statement, String nextToken, List<Object> parameters,
+	public ExecuteStatementRequest executeStatementRequest(String statement, String nextToken, List<Object> parameters,
 													DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
 		Assert.notNull(statement, "Statement must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
-		Map<String, AttributeValue> keys = new LinkedHashMap<>();
 
 		ExecuteStatementRequest.Builder builder = ExecuteStatementRequest.builder().statement(statement);
 		if (nextToken != null) {
@@ -138,7 +136,7 @@ public class StatementFactory {
 		return builder.build();
 	}
 
-	GetItemRequest findByKeys(String partitionKey, String sortKey, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
+	public GetItemRequest findByKeys(String partitionKey, String sortKey, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(partitionKey, "Keys must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
@@ -149,7 +147,7 @@ public class StatementFactory {
 			.key(keys).build();
 	}
 
-	UpdateItemRequest update(Object objectToUpdate, String tableName, DynamoDbPersistenceEntity<?> entity) {
+	public UpdateItemRequest update(Object objectToUpdate, String tableName, DynamoDbPersistenceEntity<?> entity) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(objectToUpdate, "ObjectToUpdate must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
@@ -173,9 +171,12 @@ public class StatementFactory {
 				exclusiveStartKeys.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity));
 			});
 			queryRequestBuilder.exclusiveStartKey(exclusiveStartKeys);
+
+			if (dynamoDBPageRequest.getLimit() != null) {
+				queryRequestBuilder.limit(dynamoDBPageRequest.getLimit());
+			}
 		}
 
-		queryRequestBuilder.limit(dynamoDBPageRequest.getLimit());
 
 		queryRequestBuilder.consistentRead(qr.getConsistentRead()).scanIndexForward(qr.getScanIndexForward());
 		if (qr.getExpressionAttributeNames() != null) {

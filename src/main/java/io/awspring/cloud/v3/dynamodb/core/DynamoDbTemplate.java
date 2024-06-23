@@ -154,14 +154,14 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	}
 
 	@Override
-	public <T> void delete(Class<T> entityClass, Map<String, Object> keys) {
-		delete(entityClass, keys, new DynamoDBConditionRequest());
+	public <T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey) {
+		delete(entityClass, primaryKey, sortKey, new DynamoDBConditionRequest());
 	}
 
 	@Override
-	public <T> void delete(Class<T> entityClass, Map<String, Object> keys, DynamoDBConditionRequest dynamoDBConditionRequest) {
+	public <T> void delete(Class<T> entityClass, Object primaryKey, @Nullable  Object sortKey, DynamoDBConditionRequest dynamoDBConditionRequest) {
 		String tableName = getTableName(entityClass);
-		DeleteItemRequest request = statementFactory.delete(keys, getRequiredPersistentEntity(entityClass), tableName, dynamoDBConditionRequest);
+		DeleteItemRequest request = statementFactory.delete(primaryKey, sortKey, getRequiredPersistentEntity(entityClass), tableName, dynamoDBConditionRequest);
 		maybeEmitEvent(new DynamoDbBeforeDeleteEvent<>(entityClass, tableName));
 		dynamoDbClient.deleteItem(request);
 		maybeEmitEvent(new DynamoDbAfterDeleteEvent<>(entityClass, tableName));

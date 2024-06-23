@@ -24,7 +24,7 @@ public interface DynamoDbPersistentProperty	extends PersistentProperty<DynamoDbP
 	AnnotatedType findAnnotatedType(Class<? extends Annotation> annotationType);
 
 
-    boolean isRangeKey();
+    boolean isSortKey();
 
 	 boolean isEmbedded();
 

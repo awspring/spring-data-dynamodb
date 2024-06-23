@@ -145,6 +145,12 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         Assertions.assertIterableEquals(List.of(shopTable1, shopTable2), properDynamoQuery.getEntity());
         Assertions.assertIterableEquals(List.of(shopTable2, shopTable1), sqlTypeQueryResult.getEntity());
         Assertions.assertEquals(shopTable, shopTable2);
+
+        dynamoDbTemplate.delete(shopTable1);
+        dynamoDbTemplate.delete(ShopTable.class, shopTable2.getPartitionKey(), shopTable2.getSortKey());
+
+        sqlTypeQueryResult = dynamoDbTemplate.executeStatement("Select * from shop", null, ShopTable.class);
+        Assertions.assertEquals(sqlTypeQueryResult.getEntity().size(), 0);
     }
 
     @Test

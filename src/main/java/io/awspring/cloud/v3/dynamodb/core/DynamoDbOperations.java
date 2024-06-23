@@ -2,6 +2,7 @@ package io.awspring.cloud.v3.dynamodb.core;
 
 import io.awspring.cloud.v3.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.cloud.v3.dynamodb.request.*;
+import org.springframework.lang.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -13,8 +14,8 @@ public interface DynamoDbOperations {
 	<T> Iterable<T> saveAll(Iterable<T> entities, Class entityClass);
 
 	void delete(Object entity);
-	<T> void delete(Class<T> entityClass, Map<String, Object> keys);
-	<T> void delete(Class<T> entityClass,Map<String, Object> keys, DynamoDBConditionRequest dynamoDBConditionRequest);
+	<T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey);
+	<T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey, DynamoDBConditionRequest dynamoDBConditionRequest);
 
 	DynamoDbConverter getConverter();
 
@@ -26,8 +27,8 @@ public interface DynamoDbOperations {
 
 	<T> T getEntityByKey(Object id, Class<T> entityClass);
 	<T> T getEntityByKey(Object id, Class<T> entityClass, Boolean consistentRead);
-	<T> T findEntityByKeys(String partitionKey, String sortKey, Class<T> entityClass);
-	<T> T findEntityByKeys(String partitionKey, String sortKey, Class<T> entityClass, Boolean consistentRead);
+	<T> T findEntityByKeys(String partitionKey, @Nullable  String sortKey, Class<T> entityClass);
+	<T> T findEntityByKeys(String partitionKey, @Nullable String sortKey, Class<T> entityClass, Boolean consistentRead);
 
 	<T> EntityWriteResult<T> update(T entity);
 	<T> EntityWriteResult<T> update(Map<String, Object> keys, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass);

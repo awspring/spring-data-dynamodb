@@ -17,6 +17,7 @@ import org.springframework.data.mapping.model.ParameterValueProvider;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate;
 
@@ -24,8 +25,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implements ApplicationContextAware, BeanClassLoaderAware {
-    private @Nullable
-    ClassLoader beanClassLoader;
+    private @Nullable ClassLoader beanClassLoader;
 
     //There should be option to change mapper in a future.
     private final ObjectMapper objectMapper;
@@ -107,8 +107,8 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         DynamoDbPersistentProperty persistentProperty = persistenceEntity.getPersistentProperty(PartitionKey.class);
         keys.put(persistentProperty.getColumnName(), toAttributeValue(partitionKey, false));
         if (sortKey != null) {
-            persistentProperty = persistenceEntity.getPersistentProperty(SortKey.class);
-            keys.put(persistentProperty.getColumnName(), toAttributeValue(sortKey, false));
+            var rangeKey = persistenceEntity.getSortKey();
+            keys.put(rangeKey.getColumnName(), toAttributeValue(sortKey, false));
         }
     }
 
@@ -119,11 +119,11 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
     public void updateRecoursive(Object objectToUpdate, Map<String, AttributeValueUpdate> values, DynamoDbPersistenceEntity<?> entity) {
         for (DynamoDbPersistentProperty property : entity) {
-            if (!property.isIdProperty() && !property.isRangeKey() && property.isSpecialType()) {
+            if (!property.isIdProperty() && !property.isSortKey() && property.isSpecialType()) {
                 Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                 DynamoDbPersistenceEntity<?> persis = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                 updateRecoursive(newConvertingPropertyAccessor(objectToUpdate, entity).getProperty(property), values, persis);
-            }  else if (!property.isIdProperty() && !property.isRangeKey()) {
+            }  else if (!property.isIdProperty() && !property.isSortKey()) {
                 writeInternalUpdate(newConvertingPropertyAccessor(objectToUpdate, entity), property, values);
             }
         }
@@ -139,13 +139,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
 		If we gonna call constructor instead of mapping without.
 		PreferredConstructor<R, DynamoDbPersistentProperty> persistenceConstructor = entity.getPersistenceConstructor();
 		 */
-        DynamoDbPersistentProperty rangeKey = null;
-        for (DynamoDbPersistentProperty persistentProperty : entity) {
-            if (persistentProperty.isRangeKey()) {
-                rangeKey = persistentProperty;
-            }
-        }
-
+        DynamoDbPersistentProperty rangeKey = entity.getSortKey();
 
        return read(source, rangeKey, false, entity);
     }
@@ -163,11 +157,11 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         for (DynamoDbPersistentProperty property : entity) {
             if (property.isSpecialType() && !property.serializeAsJson()) {
                 if (rangeKey != null && (startsWith(source, rangeKey, property) || endsWith(source, rangeKey, property))) {
+                    flag = true;
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
-                    flag = true;
-                } else if (rangeKey == null || property.startsWith() == null  && !flag) {
+                } else if (rangeKey == null || (StringUtils.hasText(property.startsWith()) && StringUtils.hasText(property.endsWith()))  && !flag) {
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
@@ -180,11 +174,11 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
 
     private boolean endsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
-        return property.endsWith() != null && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith()));
+        return StringUtils.hasText(property.endsWith()) && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith()));
     }
 
     private static boolean startsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
-        return property.startsWith() != null && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith()));
+        return StringUtils.hasText(property.startsWith()) && rangeKey.getType().isAssignableFrom(String.class) && (source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith()));
     }
 
 
@@ -209,14 +203,12 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
 
     private void fetchKeysAndPopulate(Object toBeUsed, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> entity) {
-        DynamoDbPersistentProperty persistentProperty = entity.getPersistentProperty(PartitionKey.class);
+        DynamoDbPersistentProperty persistentProperty = entity.getIdProperty();
         ConvertingPropertyAccessor convertingPropertyAccessor = newConvertingPropertyAccessor(toBeUsed, entity);
         keys.put(persistentProperty.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(persistentProperty), false));
 
-        Iterable<DynamoDbPersistentProperty> persistentProperties = entity.getPersistentProperties(SortKey.class);
-        persistentProperties.forEach(rangeProperty -> {
-            keys.put(rangeProperty.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(rangeProperty), false));
-        });
+        var rangeKey = entity.getSortKey();
+        keys.put(rangeKey.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(rangeKey), false));
     }
 
     @Override
@@ -307,13 +299,14 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         }  else if (conversionService.canConvert(AttributeValue.class, type)) {
             return this.conversionService.convert(attributeValue, type);
         }
-        else if (serializeAsJson || Enum.class.isAssignableFrom(type)) {
+        else if (serializeAsJson || Enum.class.isAssignableFrom(type) && attributeValue != null) {
             try {
                 return objectMapper.readValue(attributeValue.s(), type);
             } catch (JsonProcessingException e) {
                 throw new UnsupportedOperationException("Cannot convert value: " + attributeValue, e);
             }
         }
+
         return null;
     }
 
