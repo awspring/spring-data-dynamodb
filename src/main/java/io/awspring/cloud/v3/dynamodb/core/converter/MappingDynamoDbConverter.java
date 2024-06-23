@@ -161,7 +161,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
-                } else if (rangeKey == null || (StringUtils.hasText(property.startsWith()) && StringUtils.hasText(property.endsWith()))  && !flag) {
+                } else if (rangeKey == null || (doesNotStartsWith(source, rangeKey, property) || doesNotEndWith(source, rangeKey, property)) && !flag) {
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
@@ -171,6 +171,16 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
             }
         }
         return instance;
+    }
+
+    private boolean doesNotEndWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
+        return !StringUtils.hasText(property.endsWith()) || (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith())));
+
+    }
+
+    private boolean doesNotStartsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
+        return !StringUtils.hasText(property.startsWith()) || (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith())));
+
     }
 
     private boolean endsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
@@ -208,7 +218,9 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
         keys.put(persistentProperty.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(persistentProperty), false));
 
         var rangeKey = entity.getSortKey();
-        keys.put(rangeKey.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(rangeKey), false));
+        if (rangeKey != null) {
+            keys.put(rangeKey.getColumnName(), toAttributeValue(convertingPropertyAccessor.getProperty(rangeKey), false));
+        }
     }
 
     @Override
