@@ -174,12 +174,12 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
 
     private boolean doesNotEndWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
-        return !StringUtils.hasText(property.endsWith()) && (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith())));
+        return property.startsWith().equals("") || !StringUtils.hasText(property.endsWith()) && (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().endsWith(property.endsWith())));
 
     }
 
     private boolean doesNotStartsWith(Map<String, AttributeValue> source, DynamoDbPersistentProperty rangeKey, DynamoDbPersistentProperty property) {
-        return !StringUtils.hasText(property.startsWith()) && (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith())));
+        return property.startsWith().equals("") || !StringUtils.hasText(property.startsWith()) && (rangeKey.getType().isAssignableFrom(String.class) && !(source.get(rangeKey.getColumnName()).s().startsWith(property.startsWith())));
 
     }
 
