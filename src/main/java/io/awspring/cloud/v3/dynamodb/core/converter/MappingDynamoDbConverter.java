@@ -161,7 +161,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
-                } else if (rangeKey == null || (doesNotStartsWith(source, rangeKey, property) || doesNotEndWith(source, rangeKey, property)) && !flag) {
+                } else if (rangeKey == null || (doesNotStartsWith(source, rangeKey, property) && doesNotEndWith(source, rangeKey, property)) && !flag) {
                     Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
                     DynamoDbPersistenceEntity<?> newEntity = getMappingContext().getRequiredPersistentEntity(beanClassLoaderClass);
                     propertyAccessor.setProperty(property, read(source, rangeKey, flag, newEntity));
