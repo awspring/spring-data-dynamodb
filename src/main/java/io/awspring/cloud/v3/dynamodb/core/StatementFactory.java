@@ -136,7 +136,7 @@ public class StatementFactory {
 		return builder.build();
 	}
 
-	public GetItemRequest findByKeys(String partitionKey, String sortKey, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
+	public GetItemRequest findByKeys(Object partitionKey, Object sortKey, String tableName, DynamoDbPersistenceEntity<?> entity, Boolean consistentRead) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(partitionKey, "Keys must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
@@ -205,16 +205,18 @@ public class StatementFactory {
 	}
 
 
-	public UpdateItemRequest update(Map<String, Object> keys, DynamoDBUpdateExpressionRequest request, String tableName, DynamoDbPersistenceEntity entity) {
+	public UpdateItemRequest update(Object partitionKey, @Nullable Object sortKey, DynamoDBUpdateExpressionRequest request, String tableName, DynamoDbPersistenceEntity entity) {
 		Assert.notNull(tableName, "TableName must not be null");
-		Assert.notNull(keys, "Keys must not be null");
+		Assert.notNull(partitionKey, "Partition Key must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
 		Assert.notNull(request.getUpdateExpression(), "UpdateExpression must not be null");
 
-		Map<String, AttributeValue> keysToBeUsed = new HashMap<>(keys.size());
-		keys.forEach((k, v) -> {
-			keysToBeUsed.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity));
-		});
+		Map<String, AttributeValue> keysToBeUsed = new HashMap<>(2);
+		keysToBeUsed.put(entity.getIdProperty().getName(), dynamoDbConverter.convertToDynamoDbType(partitionKey, entity));
+		var sortKeyProperty = entity.getSortKey();
+		if (sortKeyProperty != null) {
+		keysToBeUsed.put(sortKeyProperty.getColumnName(), dynamoDbConverter.convertToDynamoDbType(sortKey, entity));
+		}
 
 		UpdateItemRequest.Builder builder = UpdateItemRequest.builder().tableName(tableName).key(keysToBeUsed).updateExpression(request.getUpdateExpression()).returnValues(ReturnValue.ALL_NEW);
 		if (request.getConditionExpression() != null) {

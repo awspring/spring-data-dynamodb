@@ -25,7 +25,7 @@ public interface DynamoDbConverter extends EntityConverter<DynamoDbPersistenceEn
 
 	void findByKey(Object key, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> persistenceEntity);
 
-	void findByKeys(String partitionKey, String sortKey, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> persistenceEntity);
+	void findByKeys(Object partitionKey, @Nullable  Object sortKey, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> persistenceEntity);
 
 	void update(Object objectToUpdate, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> entity, Map<String, AttributeValueUpdate> values);
 }

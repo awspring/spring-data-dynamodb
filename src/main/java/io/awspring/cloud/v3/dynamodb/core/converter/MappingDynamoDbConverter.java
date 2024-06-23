@@ -103,7 +103,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
 
     @Override
-    public void findByKeys(String partitionKey, String sortKey, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> persistenceEntity) {
+    public void findByKeys(Object partitionKey, @Nullable Object sortKey, Map<String, AttributeValue> keys, DynamoDbPersistenceEntity<?> persistenceEntity) {
         DynamoDbPersistentProperty persistentProperty = persistenceEntity.getPersistentProperty(PartitionKey.class);
         keys.put(persistentProperty.getColumnName(), toAttributeValue(partitionKey, false));
         if (sortKey != null) {

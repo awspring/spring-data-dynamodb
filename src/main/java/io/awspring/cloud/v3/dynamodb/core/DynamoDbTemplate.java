@@ -89,12 +89,12 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	}
 
 	@Override
-	public <T> T findEntityByKeys(String partitionKey, String sortKey, Class<T> entityClass) {
+	public <T> T findEntityByKeys(Object partitionKey, @Nullable Object sortKey, Class<T> entityClass) {
 		return findEntityByKeys(partitionKey, sortKey, entityClass, Boolean.FALSE);
 	}
 
 	@Override
-	public <T> T findEntityByKeys(String partitionKey, String sortKey, Class<T> entityClass, Boolean consistentRead) {
+	public <T> T findEntityByKeys(Object partitionKey, @Nullable  Object sortKey, Class<T> entityClass, Boolean consistentRead) {
 		Assert.notNull(partitionKey, "Must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
@@ -248,10 +248,10 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	}
 
 	@Override
-	public <T> EntityWriteResult<T> update(Map<String, Object> keys, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass) {
+	public <T> EntityWriteResult<T> update(Object partitionKey, @Nullable Object sortKey, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass) {
 		String tableName = getTableName(entityClass.getClass());
 		DynamoDbPersistenceEntity dynamoDbPersistenceEntity = getRequiredPersistentEntity(entityClass.getClass());
-		UpdateItemRequest updateItemRequest = statementFactory.update(keys, dynamoDBUpdateExpressionRequest, tableName, dynamoDbPersistenceEntity);
+		UpdateItemRequest updateItemRequest = statementFactory.update(partitionKey, sortKey, dynamoDBUpdateExpressionRequest, tableName, dynamoDbPersistenceEntity);
 		maybeEmitEvent(new DynamoDbBeforeUpdateEvent<>(entityClass, tableName));
 		UpdateItemResponse updateItemResponse = dynamoDbClient.updateItem(updateItemRequest);
 		maybeEmitEvent(new DynamoDbAfterUpdateEvent<>(entityClass, tableName));

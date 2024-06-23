@@ -27,10 +27,10 @@ public interface DynamoDbOperations {
 
 	<T> T getEntityByKey(Object id, Class<T> entityClass);
 	<T> T getEntityByKey(Object id, Class<T> entityClass, Boolean consistentRead);
-	<T> T findEntityByKeys(String partitionKey, @Nullable  String sortKey, Class<T> entityClass);
-	<T> T findEntityByKeys(String partitionKey, @Nullable String sortKey, Class<T> entityClass, Boolean consistentRead);
+	<T> T findEntityByKeys(Object partitionKey, @Nullable  Object sortKey, Class<T> entityClass);
+	<T> T findEntityByKeys(Object partitionKey, @Nullable Object sortKey, Class<T> entityClass, Boolean consistentRead);
 
 	<T> EntityWriteResult<T> update(T entity);
-	<T> EntityWriteResult<T> update(Map<String, Object> keys, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass);
+	<T> EntityWriteResult<T> update(Object partitionKey, @Nullable Object sortKey, DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass);
 	<T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest);
 }
