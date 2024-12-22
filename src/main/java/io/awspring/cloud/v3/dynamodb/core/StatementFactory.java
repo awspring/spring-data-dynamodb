@@ -164,14 +164,16 @@ public class StatementFactory {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(qr, "DynamoDBQueryRequest must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
+
 		QueryRequest.Builder queryRequestBuilder = QueryRequest.builder().select(Select.ALL_ATTRIBUTES);
 		if (dynamoDBPageRequest != null) {
-			Map<String, AttributeValue> exclusiveStartKeys = new HashMap<>(dynamoDBPageRequest.getLastEvaluatedKey().size());
-			dynamoDBPageRequest.getLastEvaluatedKey().forEach((k, v) -> {
-				exclusiveStartKeys.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity));
-			});
-			queryRequestBuilder.exclusiveStartKey(exclusiveStartKeys);
-
+			if (dynamoDBPageRequest.getLastEvaluatedKey() !=  null && !dynamoDBPageRequest.getLastEvaluatedKey().isEmpty()) {
+				Map<String, AttributeValue> exclusiveStartKeys = new HashMap<>(dynamoDBPageRequest.getLastEvaluatedKey().size());
+				dynamoDBPageRequest.getLastEvaluatedKey().forEach((k, v) -> {
+					exclusiveStartKeys.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity));
+				});
+				queryRequestBuilder.exclusiveStartKey(exclusiveStartKeys);
+			}
 			if (dynamoDBPageRequest.getLimit() != null) {
 				queryRequestBuilder.limit(dynamoDBPageRequest.getLimit());
 			}

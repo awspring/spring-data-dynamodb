@@ -54,7 +54,17 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         CreateTableRequest createTableRequest = CreateTableRequest.builder().tableName("someTableName").attributeDefinitions(id).keySchema(idKey).provisionedThroughput(ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build()).build();
         dynamoDbClient.createTable(createTableRequest);
         dynamoDbClient.createTable(CreateTableRequest.builder().tableName("myPojo").attributeDefinitions(id).keySchema(idKey).provisionedThroughput(ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build()).build());
+
+
+        //Create Table
+        idKey = KeySchemaElement.builder().attributeName("partitionKey").keyType(KeyType.HASH).build();
+        id = AttributeDefinition.builder().attributeName("partitionKey").attributeType(ScalarAttributeType.S).build();
+        KeySchemaElement sortKey = KeySchemaElement.builder().attributeName("sortKey").keyType(KeyType.RANGE).build();
+        AttributeDefinition sortDef = AttributeDefinition.builder().attributeName("sortKey").attributeType(ScalarAttributeType.S).build();
+        createTableRequest = CreateTableRequest.builder().tableName("shop").attributeDefinitions(id, sortDef).keySchema(idKey, sortKey).provisionedThroughput(ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build()).build();
+        dynamoDbClient.createTable(createTableRequest);
     }
+
 
     @Test
     void insertShouldInsertEntity() {
@@ -81,7 +91,7 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         dynamoDbClient.createTable(createTableRequest);
 
         Company company = new Company("Amazon Web Service", "AWS", "AWS101");
-        Person person = new Person("Jeff", "Bezos", LocalDate.now(), "AWS101");
+        Person person = new Person("Jeff", "Amazon", LocalDate.now(), "AWS101");
         CompanySingleTable companySingleTable = new CompanySingleTable("test", "sort", company, null);
         CompanySingleTable companySingleTable2 = new CompanySingleTable("test2", "sort2", null, person);
 
@@ -112,14 +122,6 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
     @Test
     void insertShouldInsertShopSingleTable() {
 
-        //Create Table
-        KeySchemaElement idKey = KeySchemaElement.builder().attributeName("partitionKey").keyType(KeyType.HASH).build();
-        AttributeDefinition id = AttributeDefinition.builder().attributeName("partitionKey").attributeType(ScalarAttributeType.S).build();
-        KeySchemaElement sortKey = KeySchemaElement.builder().attributeName("sortKey").keyType(KeyType.RANGE).build();
-        AttributeDefinition sortDef = AttributeDefinition.builder().attributeName("sortKey").attributeType(ScalarAttributeType.S).build();
-        CreateTableRequest createTableRequest = CreateTableRequest.builder().tableName("shop").attributeDefinitions(id, sortDef).keySchema(idKey, sortKey).provisionedThroughput(ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build()).build();
-        dynamoDbClient.createTable(createTableRequest);
-
         //Prepare Objects 1 Order 1 Account on same Address
         Address address = new Address("Zagreb", 10000L, "Trg bana Josipa Jelacica", "Hrvatska");
         LocalDate date = LocalDate.now();
@@ -136,7 +138,7 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         EntityReadResult<List<ShopTable>> sqlTypeQueryResult = dynamoDbTemplate.executeStatement("Select * from shop", null, ShopTable.class);
 
         // Read with proper way
-        DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.aDynamoDBQueryRequest().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
+        DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
         EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, null);
 
         //Read Specific Order
@@ -152,6 +154,9 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         sqlTypeQueryResult = dynamoDbTemplate.executeStatement("Select * from shop", null, ShopTable.class);
         Assertions.assertEquals(sqlTypeQueryResult.getEntity().size(), 0);
     }
+
+
+
 
     @Test
     void insertShouldInsertEntityNullFields() {
@@ -208,11 +213,11 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
     void insertThenGet2() {
         Map<String, AttributeValue> attributeValueMap = new HashMap<>();
         attributeValueMap.put("id", AttributeValue.builder().s("2").build());
-        attributeValueMap.put("telephoneNumber", AttributeValue.builder().s("099 44 22 09").build());
+        attributeValueMap.put("telephoneNumber", AttributeValue.builder().s("some random phone number").build());
         attributeValueMap.put("bill", AttributeValue.builder().n(BigDecimal.valueOf(200).toString()).build());
         List<AttributeValue> listOfValues = new ArrayList<>();
-        listOfValues.add(AttributeValue.builder().s("Matej").build());
-        listOfValues.add(AttributeValue.builder().s("Nedić").build());
+        listOfValues.add(AttributeValue.builder().s("Jhon").build());
+        listOfValues.add(AttributeValue.builder().s("Doe").build());
         attributeValueMap.put("ownerFacts", AttributeValue.builder().l(listOfValues).build());
         List<AttributeValue> listOfAnimals = new ArrayList<>();
         listOfAnimals.add(AttributeValue.builder().s("cat").build());
@@ -271,7 +276,7 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
     void insertBatchTest() {
         LocalDate testDate = LocalDate.now();
         List<MappingDynamoDbConverterTest.TestClass> arrayList = new ArrayList<>();
-        for (int i = 0; i <= 40; i++) {
+        for (int i = 0; i <= 100; i++) {
             arrayList.add(new MappingDynamoDbConverterTest.TestClass("randomId" + i, testDate));
             if (i % 20 == 0) {
                 dynamoDbTemplate.saveAll(arrayList, MappingDynamoDbConverterTest.TestClass.class);
@@ -281,7 +286,31 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 
         EntityReadResult<List<MappingDynamoDbConverterTest.TestClass>> list = dynamoDbTemplate.executeStatement("Select * from someTableName", null, MappingDynamoDbConverterTest.TestClass.class);
 
-        Assertions.assertEquals(list.getEntity().size(), 41);
+        Assertions.assertEquals(list.getEntity().size(), 101);
+    }
+
+    @Test
+    void testPagination() {
+        OrderSK order = new OrderSK("myUser", UUID.randomUUID(), Status.SHIPPED, null, null, "SOME#123512512");
+        List<ShopTable> entities = new ArrayList<>();
+        for(int i =1; i <= 100; i++) {
+            if (i % 20 ==  0 ) {
+                dynamoDbTemplate.saveAll(entities, ShopTable.class);
+                entities.clear();
+            }
+            var shopEntity = new ShopTable("USER#myUser", "ORDER#" + i, order, null);
+            entities.add(shopEntity);
+        }
+
+        // Read only first 20 entities
+        DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
+        EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDBPageRequest.of(20));
+
+        Assertions.assertEquals(properDynamoQuery.
+                getCount(), 20);
+        var key = properDynamoQuery.getLastEvaluatedKey();
+        properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDBPageRequest.of(20, properDynamoQuery.getLastEvaluatedKey()));
+        Assertions.assertNotEquals(key.get("sortKey"), properDynamoQuery.getLastEvaluatedKey().get("sortKey"));
     }
 
 

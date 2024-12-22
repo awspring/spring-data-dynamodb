@@ -9,6 +9,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.ApplicationEventPublisherAware;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
@@ -61,7 +63,6 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 	}
 
 	protected <E extends DynamoDbMappingEvent<T>, T> void maybeEmitEvent(E event) {
-
 		if (this.eventPublisher != null) {
 			this.eventPublisher.publishEvent(event);
 		}
@@ -186,7 +187,13 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 					}
 				}
 		);
-		return EntityQueryResult.of(listToBeReturned, queryResponse.count().longValue());
+		if(queryResponse.hasLastEvaluatedKey()) {
+			Map<String, Object> lastEvalMap = new HashMap<>(1);
+			queryResponse.lastEvaluatedKey().forEach((k,v) -> lastEvalMap.put(k, converter.convertPrimitiveType(v)));
+			return 	EntityQueryResult.of(listToBeReturned, queryResponse.count(), lastEvalMap);
+		}
+
+		return EntityQueryResult.of(listToBeReturned, queryResponse.count());
 	}
 
 	@Override
@@ -203,7 +210,7 @@ public class DynamoDbTemplate implements DynamoDbOperations, ApplicationContextA
 					}
 				}
 		);
-		return EntityQueryResult.of(listToBeReturned, scanResponse.count().longValue());
+		return EntityQueryResult.of(listToBeReturned, scanResponse.count());
 
 	}
 
