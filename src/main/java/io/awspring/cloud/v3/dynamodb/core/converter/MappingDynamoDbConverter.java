@@ -292,7 +292,10 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
     }
 
     private Object fromAttributeValue(AttributeValue attributeValue, Class<?> type, boolean serializeAsJson) {
-        if (List.class.isAssignableFrom(type)) {
+        if (attributeValue != null && attributeValue.nul() != null) {
+            return null;
+        }
+        else if (List.class.isAssignableFrom(type)) {
             if (attributeValue.hasL()) {
                 return attributeValue.l().stream().map(value -> convert(value, type)).collect(Collectors.toList());
             } else if (attributeValue.hasNs()) {
@@ -318,20 +321,20 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter implemen
                 throw new UnsupportedOperationException("Cannot convert value: " + attributeValue, e);
             }
         }
-
         return null;
     }
 
-    public Object convert (AttributeValue attributeValue, Class type) {
+    public Object convert(AttributeValue attributeValue, Class type) {
         try {
-            return getCorrectValue(attributeValue);
+            return convertPrimitiveType(attributeValue);
         } catch (UnsupportedOperationException e) {
             return objectMapper.convertValue(attributeValue, type);
         }
     }
 
 
-    private Object getCorrectValue(AttributeValue value) {
+    @Override
+    public Object convertPrimitiveType(AttributeValue value) {
         if (value.n() != null) {
             return value.n();
         } else if (value.s() != null) {

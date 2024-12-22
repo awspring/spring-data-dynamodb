@@ -53,7 +53,7 @@ public class DynamoDBQueryRequest {
 		private Builder() {
 		}
 
-		public static Builder aDynamoDBQueryRequest() {
+		public static Builder request() {
 			return new Builder();
 		}
 

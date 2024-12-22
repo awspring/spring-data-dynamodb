@@ -17,9 +17,9 @@ public class DynamoDBPageRequest {
 	}
 
 
-	public static DynamoDBPageRequest of() {
+	public static DynamoDBPageRequest of(Integer limit) {
 		DynamoDBPageRequest dynamoDBPageRequest = new DynamoDBPageRequest();
-		dynamoDBPageRequest.limit = 20;
+		dynamoDBPageRequest.limit = limit;
 		return dynamoDBPageRequest;
 	}
 
