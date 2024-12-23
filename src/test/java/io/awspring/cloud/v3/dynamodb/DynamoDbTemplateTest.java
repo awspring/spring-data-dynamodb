@@ -12,8 +12,8 @@ import io.awspring.cloud.v3.dynamodb.entities.Company;
 import io.awspring.cloud.v3.dynamodb.entities.CompanySingleTable;
 import io.awspring.cloud.v3.dynamodb.entities.Person;
 import io.awspring.cloud.v3.dynamodb.entities.shop.*;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBPageRequest;
-import io.awspring.cloud.v3.dynamodb.request.DynamoDBQueryRequest;
+import io.awspring.cloud.v3.dynamodb.request.DynamoDbPageRequest;
+import io.awspring.cloud.v3.dynamodb.request.DynamoDbQueryRequest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.callback.EntityCallbacks;
@@ -138,8 +138,12 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         EntityReadResult<List<ShopTable>> sqlTypeQueryResult = dynamoDbTemplate.executeStatement("Select * from shop", null, ShopTable.class);
 
         // Read with proper way
-        DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
+        DynamoDbQueryRequest dynamoDBQueryRequest = DynamoDbQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
         EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, null);
+
+        EntityQueryResult<List<ShopTable>> secondQuery = dynamoDbTemplate.query(ShopTable.class,
+                (DynamoDbQueryRequest.Builder db) -> db.withKeyConditionExpression("partitionKey = :pk")
+                        .withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build(), null);
 
         //Read Specific Order
         ShopTable shopTable = dynamoDbTemplate.findEntityByKeys("USER#myUser", "ORDER#15236", ShopTable.class);
@@ -147,6 +151,7 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         Assertions.assertIterableEquals(List.of(shopTable1, shopTable2), properDynamoQuery.getEntity());
         Assertions.assertIterableEquals(List.of(shopTable2, shopTable1), sqlTypeQueryResult.getEntity());
         Assertions.assertEquals(shopTable, shopTable2);
+        Assertions.assertEquals(properDynamoQuery.getEntity().size(), secondQuery.getEntity().size());
 
         dynamoDbTemplate.delete(shopTable1);
         dynamoDbTemplate.delete(ShopTable.class, shopTable2.getPartitionKey(), shopTable2.getSortKey());
@@ -303,13 +308,13 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
         }
 
         // Read only first 20 entities
-        DynamoDBQueryRequest dynamoDBQueryRequest = DynamoDBQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
-        EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDBPageRequest.of(20));
+        DynamoDbQueryRequest dynamoDBQueryRequest = DynamoDbQueryRequest.Builder.request().withKeyConditionExpression("partitionKey = :pk").withExpressionAttributeValues(Map.of(":pk", "USER#myUser")).build();
+        EntityQueryResult<List<ShopTable>> properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDbPageRequest.of(20));
 
         Assertions.assertEquals(properDynamoQuery.
                 getCount(), 20);
         var key = properDynamoQuery.getLastEvaluatedKey();
-        properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDBPageRequest.of(20, properDynamoQuery.getLastEvaluatedKey()));
+        properDynamoQuery = dynamoDbTemplate.query(ShopTable.class,  dynamoDBQueryRequest, DynamoDbPageRequest.of(20, properDynamoQuery.getLastEvaluatedKey()));
         Assertions.assertNotEquals(key.get("sortKey"), properDynamoQuery.getLastEvaluatedKey().get("sortKey"));
     }
 

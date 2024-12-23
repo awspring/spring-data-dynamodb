@@ -2,7 +2,7 @@ package io.awspring.cloud.v3.dynamodb.request;
 
 import java.util.Map;
 
-public class DynamoDBQueryRequest {
+public class DynamoDbQueryRequest {
 
 	private String filterExpression;
 	private String indexName;
@@ -92,8 +92,8 @@ public class DynamoDBQueryRequest {
 			return this;
 		}
 
-		public DynamoDBQueryRequest build() {
-			DynamoDBQueryRequest dynamoDBQueryRequest = new DynamoDBQueryRequest();
+		public DynamoDbQueryRequest build() {
+			DynamoDbQueryRequest dynamoDBQueryRequest = new DynamoDbQueryRequest();
 			dynamoDBQueryRequest.filterExpression = this.filterExpression;
 			dynamoDBQueryRequest.expressionAttributeNames = this.expressionAttributeNames;
 			dynamoDBQueryRequest.expressionAttributeValues = this.expressionAttributeValues;

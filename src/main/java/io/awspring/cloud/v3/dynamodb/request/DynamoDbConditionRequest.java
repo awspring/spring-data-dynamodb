@@ -2,7 +2,7 @@ package io.awspring.cloud.v3.dynamodb.request;
 
 import java.util.Map;
 
-public class DynamoDBConditionRequest{
+public class DynamoDbConditionRequest {
 
 	private String conditionExpression;
 	private Map<String, String> expressionAttributeNames;
@@ -29,7 +29,7 @@ public class DynamoDBConditionRequest{
 		private Builder() {
 		}
 
-		public static Builder aDynamoDBConditionRequest() {
+		public static Builder request() {
 			return new Builder();
 		}
 
@@ -48,8 +48,8 @@ public class DynamoDBConditionRequest{
 			return this;
 		}
 
-		public DynamoDBConditionRequest build() {
-			DynamoDBConditionRequest dynamoDBConditionRequest = new DynamoDBConditionRequest();
+		public DynamoDbConditionRequest build() {
+			DynamoDbConditionRequest dynamoDBConditionRequest = new DynamoDbConditionRequest();
 			dynamoDBConditionRequest.expressionAttributeValues = this.expressionAttributeValues;
 			dynamoDBConditionRequest.conditionExpression = this.conditionExpression;
 			dynamoDBConditionRequest.expressionAttributeNames = this.expressionAttributeNames;

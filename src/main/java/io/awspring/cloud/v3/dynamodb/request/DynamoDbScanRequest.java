@@ -1,6 +1,5 @@
 package io.awspring.cloud.v3.dynamodb.request;
 
-import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.Select;
 
 import java.util.Map;
@@ -93,5 +92,84 @@ public class DynamoDbScanRequest {
 
     public void setSelect(Select select) {
         this.select = select;
+    }
+
+
+    public static final class Builder {
+        private boolean consistentRead;
+        private Map<String, Object> exclusiveStartKey;
+        private Map<String, String> expressionAttributeNames;
+        private Map<String, Object> expressionAttributeValues;
+        private String filterExpression;
+        private String indexName;
+        private Integer limit;
+        private String projectionExpression;
+        private Select select;
+
+        private Builder() {
+        }
+
+        public static Builder builder() {
+            return new Builder();
+        }
+
+        public Builder withConsistentRead(boolean consistentRead) {
+            this.consistentRead = consistentRead;
+            return this;
+        }
+
+        public Builder withExclusiveStartKey(Map<String, Object> exclusiveStartKey) {
+            this.exclusiveStartKey = exclusiveStartKey;
+            return this;
+        }
+
+        public Builder withExpressionAttributeNames(Map<String, String> expressionAttributeNames) {
+            this.expressionAttributeNames = expressionAttributeNames;
+            return this;
+        }
+
+        public Builder withExpressionAttributeValues(Map<String, Object> expressionAttributeValues) {
+            this.expressionAttributeValues = expressionAttributeValues;
+            return this;
+        }
+
+        public Builder withFilterExpression(String filterExpression) {
+            this.filterExpression = filterExpression;
+            return this;
+        }
+
+        public Builder withIndexName(String indexName) {
+            this.indexName = indexName;
+            return this;
+        }
+
+        public Builder withLimit(Integer limit) {
+            this.limit = limit;
+            return this;
+        }
+
+        public Builder withProjectionExpression(String projectionExpression) {
+            this.projectionExpression = projectionExpression;
+            return this;
+        }
+
+        public Builder withSelect(Select select) {
+            this.select = select;
+            return this;
+        }
+
+        public DynamoDbScanRequest build() {
+            DynamoDbScanRequest dynamoDbScanRequest = new DynamoDbScanRequest();
+            dynamoDbScanRequest.setConsistentRead(consistentRead);
+            dynamoDbScanRequest.setExclusiveStartKey(exclusiveStartKey);
+            dynamoDbScanRequest.setExpressionAttributeNames(expressionAttributeNames);
+            dynamoDbScanRequest.setExpressionAttributeValues(expressionAttributeValues);
+            dynamoDbScanRequest.setFilterExpression(filterExpression);
+            dynamoDbScanRequest.setIndexName(indexName);
+            dynamoDbScanRequest.setLimit(limit);
+            dynamoDbScanRequest.setProjectionExpression(projectionExpression);
+            dynamoDbScanRequest.setSelect(select);
+            return dynamoDbScanRequest;
+        }
     }
 }

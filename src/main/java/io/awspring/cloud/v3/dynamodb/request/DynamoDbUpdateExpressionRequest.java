@@ -3,7 +3,7 @@ package io.awspring.cloud.v3.dynamodb.request;
 
 import java.util.Map;
 
-public class DynamoDBUpdateExpressionRequest{
+public class DynamoDbUpdateExpressionRequest {
 
 	private String conditionExpression;
 	private Map<String, String> expressionAttributeNames;
@@ -36,7 +36,7 @@ public class DynamoDBUpdateExpressionRequest{
 		private Builder() {
 		}
 
-		public static Builder aDynamoDBUpdateExpressionRequest() {
+		public static Builder builder() {
 			return new Builder();
 		}
 
@@ -60,8 +60,8 @@ public class DynamoDBUpdateExpressionRequest{
 			return this;
 		}
 
-		public DynamoDBUpdateExpressionRequest build() {
-			DynamoDBUpdateExpressionRequest dynamoDBUpdateExpressionRequest = new DynamoDBUpdateExpressionRequest();
+		public DynamoDbUpdateExpressionRequest build() {
+			DynamoDbUpdateExpressionRequest dynamoDBUpdateExpressionRequest = new DynamoDbUpdateExpressionRequest();
 			dynamoDBUpdateExpressionRequest.conditionExpression = this.conditionExpression;
 			dynamoDBUpdateExpressionRequest.expressionAttributeNames = this.expressionAttributeNames;
 			dynamoDBUpdateExpressionRequest.updateExpression = this.updateExpression;

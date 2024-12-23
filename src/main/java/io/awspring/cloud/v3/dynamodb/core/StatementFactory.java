@@ -3,8 +3,6 @@ package io.awspring.cloud.v3.dynamodb.core;
 import io.awspring.cloud.v3.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.cloud.v3.dynamodb.core.mapping.DynamoDbPersistenceEntity;
 import io.awspring.cloud.v3.dynamodb.request.*;
-import org.springframework.data.projection.ProjectionFactory;
-import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -14,7 +12,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class StatementFactory {
@@ -28,7 +25,7 @@ public class StatementFactory {
 
 
 	public PutItemRequest insert(Object objectToInsert,
-						  DynamoDbPersistenceEntity<?> persistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
+						  DynamoDbPersistenceEntity<?> persistentEntity, String tableName, DynamoDbConditionRequest dynamoDBConditionRequest) {
 
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(objectToInsert, "Object to insert must not be null");
@@ -78,7 +75,7 @@ public class StatementFactory {
 		return DeleteItemRequest.builder().tableName(tableName).key(keys).build();
 	}
 
-	public DeleteItemRequest delete(Object partitionKey, @Nullable Object sortKey, DynamoDbPersistenceEntity<?> requiredPersistentEntity, String tableName, DynamoDBConditionRequest dynamoDBConditionRequest) {
+	public DeleteItemRequest delete(Object partitionKey, @Nullable Object sortKey, DynamoDbPersistenceEntity<?> requiredPersistentEntity, String tableName, DynamoDbConditionRequest dynamoDBConditionRequest) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(partitionKey, "Partition key must not be null");
 		Assert.notNull(requiredPersistentEntity, "DynamoDbPersistenceEntity must not be null");
@@ -160,7 +157,7 @@ public class StatementFactory {
 		return UpdateItemRequest.builder().tableName(tableName).attributeUpdates(values).key(keys).build();
 	}
 
-	public QueryRequest query(String tableName, DynamoDbPersistenceEntity entity, DynamoDBQueryRequest qr, DynamoDBPageRequest dynamoDBPageRequest) {
+	public QueryRequest query(String tableName, DynamoDbPersistenceEntity entity, DynamoDbQueryRequest qr, DynamoDbPageRequest dynamoDBPageRequest) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(qr, "DynamoDBQueryRequest must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
@@ -207,7 +204,7 @@ public class StatementFactory {
 	}
 
 
-	public UpdateItemRequest update(Object partitionKey, @Nullable Object sortKey, DynamoDBUpdateExpressionRequest request, String tableName, DynamoDbPersistenceEntity entity) {
+	public UpdateItemRequest update(Object partitionKey, @Nullable Object sortKey, DynamoDbUpdateExpressionRequest request, String tableName, DynamoDbPersistenceEntity entity) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(partitionKey, "Partition Key must not be null");
 		Assert.notNull(entity, "DynamoDbPersistenceEntity must not be null");
