@@ -30,10 +30,13 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Properties;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
+import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.NamedQueries;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
@@ -42,9 +45,14 @@ import org.springframework.data.repository.query.CachingValueExpressionDelegate;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-public class NamedQueryResolutionTest {
+@DisplayName("Named query resolution")
+class NamedQueryResolutionTest {
 
-	@Table(tableName = "test_entity")
+	private static final String TABLE_NAME = "test_entity";
+	private static final String NAMED_QUERY_NAME = "TestEntity.findByNamedQuery";
+	private static final String NAMED_QUERY_EXPRESSION = "#s = :round";
+
+	@Table(tableName = TABLE_NAME)
 	static class TestEntity {
 		@PartitionKey
 		private String id;
@@ -76,22 +84,18 @@ public class NamedQueryResolutionTest {
 		}
 	}
 
-	interface TestRepository extends org.springframework.data.repository.Repository<TestEntity, String> {
+	interface TestRepository extends Repository<TestEntity, String> {
 		@AllowScan
 		List<TestEntity> findByNamedQuery(String round);
 	}
 
+	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private static <M extends DynamoDbPersistentEntity<?>> void stubMappingContext(DynamoDbConverter converter,
-                                                                                   MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
+			MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
 		when(converter.getMappingContext()).thenReturn((MappingContext) mappingContext);
 	}
 
-	@Test
-	void namedQueryTakesPrecedenceOverDerivedQuery() throws NoSuchMethodException {
-		Properties namedQueryProps = new Properties();
-		namedQueryProps.setProperty("TestEntity.findByNamedQuery", "#s = :round");
-		NamedQueries namedQueries = new PropertiesBasedNamedQueries(namedQueryProps);
-
+	private RepositoryQuery resolveQuery(NamedQueries namedQueries) throws NoSuchMethodException {
 		RepositoryMetadata metadata = new DefaultRepositoryMetadata(TestRepository.class);
 		Method method = TestRepository.class.getMethod("findByNamedQuery", String.class);
 		ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
@@ -120,64 +124,82 @@ public class NamedQueryResolutionTest {
 		else {
 			resolvedQuery = new PartTreeDynamoDbQuery(queryMethod, operations);
 		}
-
-		Assertions.assertNotNull(resolvedQuery, "resolveQuery must return a RepositoryQuery instance");
-		Assertions.assertInstanceOf(StringBasedDynamoDbQuery.class, resolvedQuery,
-				"Named query should resolve to StringBasedDynamoDbQuery, not PartTreeDynamoDbQuery");
-		Assertions.assertEquals(queryMethod, resolvedQuery.getQueryMethod(),
-				"Resolved query must wrap the correct DynamoDbQueryMethod");
+		return resolvedQuery;
 	}
 
-	@Test
-	void namedQueryNameConventionMatchesRepositoryMethod() throws NoSuchMethodException {
+	@Nested
+	@DisplayName("Named query present")
+	class NamedQueryPresentTests {
 
-		RepositoryMetadata metadata = new DefaultRepositoryMetadata(TestRepository.class);
-		Method method = TestRepository.class.getMethod("findByNamedQuery", String.class);
-		ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
-		MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext = new DynamoDbMappingContext();
+		@Test
+		@DisplayName("named query takes precedence over derived query")
+		void namedQueryTakesPrecedenceOverDerivedQuery() throws NoSuchMethodException {
+			// Arrange
+			Properties namedQueryProps = new Properties();
+			namedQueryProps.setProperty(NAMED_QUERY_NAME, NAMED_QUERY_EXPRESSION);
+			NamedQueries namedQueries = new PropertiesBasedNamedQueries(namedQueryProps);
 
-		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, projectionFactory, mappingContext);
-		String namedQueryName = queryMethod.getNamedQueryName();
+			// Act
+			RepositoryQuery resolvedQuery = resolveQuery(namedQueries);
 
-		Assertions.assertEquals("TestEntity.findByNamedQuery", namedQueryName,
-				"Named query name must follow EntityName.methodName convention");
+			// Assert
+			Assertions.assertAll(
+					() -> Assertions.assertNotNull(resolvedQuery,
+							"resolveQuery must return a RepositoryQuery instance"),
+					() -> Assertions.assertInstanceOf(StringBasedDynamoDbQuery.class, resolvedQuery,
+							"Named query should resolve to StringBasedDynamoDbQuery, not PartTreeDynamoDbQuery"),
+					() -> Assertions.assertEquals(
+							new DynamoDbQueryMethod(TestRepository.class.getMethod("findByNamedQuery", String.class),
+									new DefaultRepositoryMetadata(TestRepository.class),
+									new SpelAwareProxyProjectionFactory(), new DynamoDbMappingContext()).getName(),
+							resolvedQuery.getQueryMethod().getName(),
+							"Resolved query must wrap the correct DynamoDbQueryMethod"));
+		}
 	}
 
-	@Test
-	void whenNoNamedQueryExistsFallsThroughToDerivedQuery() throws NoSuchMethodException {
-		NamedQueries namedQueries = new PropertiesBasedNamedQueries(new Properties());
+	@Nested
+	@DisplayName("Named query naming convention")
+	class NamingConventionTests {
 
-		RepositoryMetadata metadata = new DefaultRepositoryMetadata(TestRepository.class);
-		Method method = TestRepository.class.getMethod("findByNamedQuery", String.class);
-		ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
+		@Test
+		@DisplayName("named query name follows EntityName.methodName convention")
+		void namedQueryNameConventionMatchesRepositoryMethod() throws NoSuchMethodException {
+			// Arrange
+			RepositoryMetadata metadata = new DefaultRepositoryMetadata(TestRepository.class);
+			Method method = TestRepository.class.getMethod("findByNamedQuery", String.class);
+			ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
 
-		DynamoDbOperations operations = mock(DynamoDbOperations.class);
-		DynamoDbConverter converter = mock(DynamoDbConverter.class);
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		when(operations.getConverter()).thenReturn(converter);
-		stubMappingContext(converter, mappingContext);
+			// Act
+			DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, projectionFactory,
+					mappingContext);
+			String namedQueryName = queryMethod.getNamedQueryName();
 
-		ValueExpressionDelegate valueExpressionDelegate = new CachingValueExpressionDelegate(
-				ValueExpressionDelegate.create());
-
-		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, projectionFactory, mappingContext);
-		String namedQueryName = queryMethod.getNamedQueryName();
-
-		RepositoryQuery resolvedQuery = null;
-		if (namedQueries.hasQuery(namedQueryName)) {
-			String namedQueryString = namedQueries.getQuery(namedQueryName);
-			resolvedQuery = new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate,
-					namedQueryString);
+			// Assert
+			Assertions.assertEquals(NAMED_QUERY_NAME, namedQueryName,
+					"Named query name must follow EntityName.methodName convention");
 		}
-		else if (queryMethod.hasAnnotatedQuery()) {
-			resolvedQuery = new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
-		}
-		else {
-			resolvedQuery = new PartTreeDynamoDbQuery(queryMethod, operations);
-		}
+	}
 
-		Assertions.assertNotNull(resolvedQuery, "resolveQuery must return a RepositoryQuery instance");
-		Assertions.assertInstanceOf(PartTreeDynamoDbQuery.class, resolvedQuery,
-				"Without a named query or @Query annotation, method should resolve to PartTreeDynamoDbQuery");
+	@Nested
+	@DisplayName("Named query absent (fallback)")
+	class FallbackTests {
+
+		@Test
+		@DisplayName("falls through to derived query when no named query exists")
+		void whenNoNamedQueryExistsFallsThroughToDerivedQuery() throws NoSuchMethodException {
+			// Arrange
+			NamedQueries namedQueries = new PropertiesBasedNamedQueries(new Properties());
+
+			// Act
+			RepositoryQuery resolvedQuery = resolveQuery(namedQueries);
+
+			// Assert
+			Assertions.assertAll(
+					() -> Assertions.assertNotNull(resolvedQuery,
+							"resolveQuery must return a RepositoryQuery instance"),
+					() -> Assertions.assertInstanceOf(PartTreeDynamoDbQuery.class, resolvedQuery,
+							"Without a named query or @Query annotation, method should resolve to PartTreeDynamoDbQuery"));
+		}
 	}
 }

@@ -20,6 +20,10 @@ import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class Match {
 
 	private String tournamentId;
@@ -27,7 +31,7 @@ public class Match {
 	private MatchStatus round;
 	private LocalDate scheduledAt;
 
-	@InnerClass(serializeAsJson = true)
+	@InnerClass(serializeAsNestedMap = true)
 	private Venue venue;
 
 	public Match() {
@@ -83,10 +87,6 @@ public class Match {
 
 	@Override
 	public boolean equals(Object o) {
-		if (this == o)
-			return true;
-		if (o == null || getClass() != o.getClass())
-			return false;
 		Match match = (Match) o;
 		return Objects.equals(tournamentId, match.tournamentId) && Objects.equals(matchId, match.matchId)
 				&& Objects.equals(round, match.round) && Objects.equals(scheduledAt, match.scheduledAt)

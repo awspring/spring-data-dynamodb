@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import io.awspring.cloud.dynamodb.LocalStackTestContainer;
 import io.awspring.cloud.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
@@ -24,11 +28,14 @@ import io.awspring.cloud.dynamodb.repository.DynamoDbRepository;
 import io.awspring.cloud.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
@@ -42,6 +49,9 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 public class NamedQuerySupportTest extends LocalStackTestContainer {
 
 	private static final String TABLE_NAME = "named_query_test_entity";
+	private static final String ACTIVE_ROUND = "active";
+	private static final String INACTIVE_ROUND = "inactive";
+	private static final String TEST_ROUND = "test";
 
 	private AnnotationConfigApplicationContext context;
 	private NamedQueryTestRepository repository;
@@ -97,24 +107,11 @@ public class NamedQuerySupportTest extends LocalStackTestContainer {
 	void setUp() {
 		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
 				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-						.create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-								.create(localstack.getAccessKey(), localstack.getSecretKey())))
+				.credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
 				.build();
 
-		try {
-			dynamoDbClient.deleteTable(builder -> builder.tableName(TABLE_NAME));
-		}
-		catch (ResourceNotFoundException notFound) {
-		}
-
-		dynamoDbClient.createTable(CreateTableRequest.builder().tableName(TABLE_NAME)
-				.attributeDefinitions(
-						AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build())
-				.keySchema(KeySchemaElement.builder().attributeName("id").keyType(KeyType.HASH).build())
-				.provisionedThroughput(
-						ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build())
-				.build());
+		recreateTable(dynamoDbClient);
 
 		context = new AnnotationConfigApplicationContext();
 		context.registerBean(DynamoDbClient.class, () -> dynamoDbClient);
@@ -130,6 +127,22 @@ public class NamedQuerySupportTest extends LocalStackTestContainer {
 		}
 	}
 
+	private static void recreateTable(DynamoDbClient client) {
+		try {
+			client.deleteTable(builder -> builder.tableName(TABLE_NAME));
+		}
+		catch (ResourceNotFoundException notFound) {
+		}
+
+		client.createTable(CreateTableRequest.builder().tableName(TABLE_NAME)
+				.attributeDefinitions(
+						AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build())
+				.keySchema(KeySchemaElement.builder().attributeName("id").keyType(KeyType.HASH).build())
+				.provisionedThroughput(
+						ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build())
+				.build());
+	}
+
 	private static NamedQueryTestEntity entityWithIdAndRound(String id, String round) {
 		NamedQueryTestEntity entity = new NamedQueryTestEntity();
 		entity.setId(id);
@@ -137,26 +150,33 @@ public class NamedQuerySupportTest extends LocalStackTestContainer {
 		return entity;
 	}
 
-	@Test
-	void namedQueryResolvesAndExecutesAsFilterExpressionScan() {
-		repository.save(entityWithIdAndRound("nq-1", "active"));
-		repository.save(entityWithIdAndRound("nq-2", "inactive"));
-		repository.save(entityWithIdAndRound("nq-3", "active"));
+	@Nested
+	@DisplayName("Named query execution")
+	class NamedQueryExecution {
 
-		List<NamedQueryTestEntity> active = repository.findByNamedQuery("active");
+		@Test
+		@DisplayName("named query resolves from properties and executes as a filter-expression scan")
+		void namedQuery_withFilterExpression_returnsMatchingEntities() {
+			repository.save(entityWithIdAndRound("nq-1", ACTIVE_ROUND));
+			repository.save(entityWithIdAndRound("nq-2", INACTIVE_ROUND));
+			repository.save(entityWithIdAndRound("nq-3", ACTIVE_ROUND));
 
-		Assertions.assertEquals(2, active.size(), "Named query should find 2 entities with round=active");
-		Assertions.assertTrue(active.stream().allMatch(e -> "active".equals(e.getRound())),
-				"All returned entities should have round=active");
-	}
+			List<NamedQueryTestEntity> active = repository.findByNamedQuery(ACTIVE_ROUND);
 
-	@Test
-	void namedQueryTakesPrecedenceOverDerivedQuery() {
+			assertAll("named query filters correctly",
+					() -> assertEquals(2, active.size(), "Named query should find 2 entities with round=active"),
+					() -> assertTrue(active.stream().allMatch(e -> ACTIVE_ROUND.equals(e.getRound())),
+							"All returned entities should have round=active"));
+		}
 
-		repository.save(entityWithIdAndRound("nq-precedence-1", "test"));
+		@Test
+		@DisplayName("named query takes precedence over derived query resolution")
+		void namedQuery_whenMethodNameMatchesBoth_takePrecedenceOverDerived() {
+			repository.save(entityWithIdAndRound("nq-precedence-1", TEST_ROUND));
 
-		List<NamedQueryTestEntity> results = repository.findByNamedQuery("test");
+			List<NamedQueryTestEntity> results = repository.findByNamedQuery(TEST_ROUND);
 
-		Assertions.assertEquals(1, results.size(), "Named query should resolve and execute, not PartTree derivation");
+			assertEquals(1, results.size(), "Named query should resolve and execute, not PartTree derivation");
+		}
 	}
 }

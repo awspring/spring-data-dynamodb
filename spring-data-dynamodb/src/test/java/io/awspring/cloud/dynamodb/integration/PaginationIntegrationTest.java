@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -37,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -46,6 +49,8 @@ import org.springframework.data.domain.KeysetScrollPosition;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
@@ -58,13 +63,15 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 public class PaginationIntegrationTest extends LocalStackTestContainer {
 
-	private static final String TABLE = "pagination_it";
+	private static final String TABLE_NAME = "pagination_it";
+	private static final String PARTITION = "P";
+	private static final int PAGE_SIZE = 2;
 
 	private AnnotationConfigApplicationContext context;
 	private PagedItemRepository repository;
 	private DynamoDbTemplate template;
 
-	@Table(tableName = TABLE)
+	@Table(tableName = TABLE_NAME)
 	public static class PagedItem {
 
 		@PartitionKey
@@ -134,9 +141,8 @@ public class PaginationIntegrationTest extends LocalStackTestContainer {
 	void setUp() {
 		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
 				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-						.create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-								.create(localstack.getAccessKey(), localstack.getSecretKey())))
+				.credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
 				.build();
 
 		recreateTable(dynamoDbClient);
@@ -158,11 +164,11 @@ public class PaginationIntegrationTest extends LocalStackTestContainer {
 
 	private static void recreateTable(DynamoDbClient client) {
 		try {
-			client.deleteTable(builder -> builder.tableName(TABLE));
+			client.deleteTable(builder -> builder.tableName(TABLE_NAME));
 		}
 		catch (ResourceNotFoundException notFound) {
 		}
-		client.createTable(CreateTableRequest.builder().tableName(TABLE)
+		client.createTable(CreateTableRequest.builder().tableName(TABLE_NAME)
 				.attributeDefinitions(
 						AttributeDefinition.builder().attributeName("pk").attributeType(ScalarAttributeType.S).build(),
 						AttributeDefinition.builder().attributeName("sk").attributeType(ScalarAttributeType.N).build())
@@ -173,95 +179,115 @@ public class PaginationIntegrationTest extends LocalStackTestContainer {
 				.build());
 	}
 
-	private void insert(String pk, long... sortKeys) {
+	private void insertItems(String pk, long... sortKeys) {
 		for (long sk : sortKeys) {
 			repository.save(new PagedItem(pk, sk, "item-" + sk));
 		}
 	}
 
-	@Test
-	void windowKeysetPaginationOverNumericSortKeyReturnsEveryPageInOrder() {
-		insert("P", 1L, 2L, 3L, 4L, 5L);
+	@Nested
+	@DisplayName("Window/keyset pagination")
+	class WindowPagination {
 
-		List<Long> collected = new ArrayList<>();
-		ScrollPosition position = ScrollPosition.keyset();
-		int pages = 0;
-		Window<PagedItem> window;
+		@Test
+		@DisplayName("keyset pagination over a numeric sort key returns every page in order")
+		void findByPk_multiplePages_returnsAllInOrder() {
+			insertItems(PARTITION, 1L, 2L, 3L, 4L, 5L);
 
-		do {
-			window = repository.findByPk("P", position, Limit.of(2));
-			window.forEach(item -> collected.add(item.getSk()));
-			pages++;
-			if (window.hasNext()) {
-				position = window.positionAt(window.getContent().size() - 1);
+			List<Long> collected = new ArrayList<>();
+			ScrollPosition position = ScrollPosition.keyset();
+			int pages = 0;
+			Window<PagedItem> window;
+
+			do {
+				window = repository.findByPk(PARTITION, position, Limit.of(PAGE_SIZE));
+				window.forEach(item -> collected.add(item.getSk()));
+				pages++;
+				if (window.hasNext()) {
+					position = window.positionAt(window.getContent().size() - 1);
+				}
 			}
+			while (window.hasNext() && pages < 10);
+
+			int totalPages = pages;
+			assertAll("pagination traverses all rows exactly once",
+					() -> assertEquals(List.of(1L, 2L, 3L, 4L, 5L), collected,
+							"every row must be returned exactly once, in ascending numeric sort-key order"),
+					() -> assertEquals(3, totalPages, "5 rows at page size 2 must span 3 pages (2 + 2 + 1)"));
 		}
-		while (window.hasNext() && pages < 10);
 
-		assertEquals(List.of(1L, 2L, 3L, 4L, 5L), collected,
-				"every row must be returned exactly once, in ascending numeric sort-key match, across pages");
-		assertEquals(3, pages, "5 rows at page size 2 must span 3 pages (2 + 2 + 1)");
+		@Test
+		@DisplayName("resume cursor holds a domain Number, never an AttributeValue")
+		void findByPk_firstPage_cursorIsCleanDomainType() {
+			insertItems(PARTITION, 10L, 20L, 30L);
+
+			Window<PagedItem> firstPage = repository.findByPk(PARTITION, ScrollPosition.keyset(), Limit.of(1));
+
+			assertTrue(firstPage.hasNext(), "with 3 rows at page size 1 there must be a next page");
+			ScrollPosition next = firstPage.positionAt(firstPage.getContent().size() - 1);
+			KeysetScrollPosition keyset = assertInstanceOf(KeysetScrollPosition.class, next,
+					"DynamoDB pagination must produce a keyset ScrollPosition");
+
+			Object skCursor = keyset.getKeys().get("sk");
+			assertAll("cursor value is a clean domain type",
+					() -> assertNotNull(skCursor, "the resume cursor must carry the numeric sort key"),
+					() -> assertInstanceOf(Number.class, skCursor,
+							"the cursor value must be a clean domain Number -- never an AWS SDK AttributeValue"),
+					() -> assertFalse(skCursor.getClass().getName().startsWith("software.amazon.awssdk"),
+							"no AWS SDK type may leak into the pagination cursor"));
+		}
 	}
 
-	@Test
-	void windowResumeCursorHoldsADomainNumberNeverAnAttributeValue() {
-		insert("P", 10L, 20L, 30L);
+	@Nested
+	@DisplayName("Scan pagination")
+	class ScanPagination {
 
-		Window<PagedItem> firstPage = repository.findByPk("P", ScrollPosition.keyset(), Limit.of(1));
+		@Test
+		@DisplayName("scan returns LastEvaluatedKey when more pages remain")
+		void scan_withLimit_returnsLastEvaluatedKey() {
+			insertItems(PARTITION, 1L, 2L, 3L);
 
-		assertTrue(firstPage.hasNext(), "with 3 rows at page size 1 there must be a next page");
-		ScrollPosition next = firstPage.positionAt(firstPage.getContent().size() - 1);
-		KeysetScrollPosition keyset = assertInstanceOf(KeysetScrollPosition.class, next,
-				"DynamoDB pagination must produce a keyset ScrollPosition");
+			EntityQueryResult<List<PagedItem>> firstPage = template.scan(PagedItem.class,
+					DynamoDbScanRequest.Builder.builder().withLimit(1).build());
 
-		Object skCursor = keyset.getKeys().get("sk");
-		assertNotNull(skCursor, "the resume cursor must carry the numeric sort key");
-		assertInstanceOf(Number.class, skCursor,
-				"the cursor value must be a clean domain Number -- never an AWS SDK AttributeValue");
-		assertFalse(skCursor.getClass().getName().startsWith("software.amazon.awssdk"),
-				"no AWS SDK type may leak into the pagination cursor");
-	}
+			Map<String, Object> cursor = firstPage.getLastEvaluatedKey();
+			assertAll("scan cursor present",
+					() -> assertNotNull(cursor, "scan() must return a LastEvaluatedKey when more pages remain"),
+					() -> assertFalse(cursor.isEmpty(), "the scan cursor must not be empty when more pages remain"));
+		}
 
-	@Test
-	void scanReturnsLastEvaluatedKeyWhenMorePagesRemain() {
-		insert("P", 1L, 2L, 3L);
+		@Test
+		@DisplayName("count aggregates across every scan page")
+		void count_withSmallPageSize_aggregatesAllPages() {
+			insertItems(PARTITION, 1L, 2L, 3L, 4L, 5L);
 
-		EntityQueryResult<List<PagedItem>> firstPage = template.scan(PagedItem.class,
-				DynamoDbScanRequest.Builder.builder().withLimit(1).build());
+			long count = template.count(PagedItem.class, DynamoDbScanRequest.Builder.builder().withLimit(2).build());
 
-		Map<String, Object> cursor = firstPage.getLastEvaluatedKey();
-		assertNotNull(cursor, "scan() must return a LastEvaluatedKey when more pages remain");
-		assertFalse(cursor.isEmpty(), "the scan cursor must not be empty when more pages remain");
-	}
+			assertEquals(5L, count, "count must aggregate across every scan page, not just the first");
+		}
 
-	@Test
-	void countWalksEveryScanPage() {
-		insert("P", 1L, 2L, 3L, 4L, 5L);
+		@Test
+		@DisplayName("exists finds a match that lives beyond the first scan page")
+		void exists_matchOnLaterPage_returnsTrue() {
+			insertItems(PARTITION, 1L, 2L, 3L, 4L, 5L);
+			repository.save(new PagedItem(PARTITION, 6L, "needle"));
 
-		long count = template.count(PagedItem.class, DynamoDbScanRequest.Builder.builder().withLimit(2).build());
+			DynamoDbScanRequest request = DynamoDbScanRequest.Builder.builder().withLimit(1)
+					.withFilterExpression("#n = :n").withExpressionAttributeNames(Map.of("#n", "name"))
+					.withExpressionAttributeValues(Map.of(":n", "needle")).build();
 
-		assertEquals(5L, count, "count must aggregate across every scan page, not just the first");
-	}
+			assertTrue(template.exists(PagedItem.class, request),
+					"exists must find a match on a later scan page, not only the first");
+		}
 
-	@Test
-	void existsFindsAMatchThatLivesBeyondTheFirstScanPage() {
-		insert("P", 1L, 2L, 3L, 4L, 5L);
-		repository.save(new PagedItem("P", 6L, "needle"));
+		@Test
+		@DisplayName("findAll returns every row via auto-paginated scan")
+		void findAll_allRows_returnsAll() {
+			insertItems(PARTITION, 1L, 2L, 3L, 4L, 5L);
 
-		DynamoDbScanRequest request = DynamoDbScanRequest.Builder.builder().withLimit(1).withFilterExpression("#n = :n")
-				.withExpressionAttributeNames(Map.of("#n", "name"))
-				.withExpressionAttributeValues(Map.of(":n", "needle")).build();
+			List<PagedItem> all = template.findAll(PagedItem.class);
 
-		assertTrue(template.exists(PagedItem.class, request),
-				"exists must find a match on a later scan page, not only the first");
-	}
-
-	@Test
-	void findAllReturnsEveryRow() {
-		insert("P", 1L, 2L, 3L, 4L, 5L);
-
-		List<PagedItem> all = template.findAll(PagedItem.class);
-
-		assertEquals(5, all.size(), "findAll must return every row via an auto-paginated scan");
+			assertEquals(5, all.size(), "findAll must return every row via an auto-paginated scan");
+		}
 	}
 }

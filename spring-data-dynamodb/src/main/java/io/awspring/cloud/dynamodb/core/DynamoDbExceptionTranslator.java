@@ -20,6 +20,10 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.support.PersistenceExceptionTranslator;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @FunctionalInterface
 public interface DynamoDbExceptionTranslator extends PersistenceExceptionTranslator {
 

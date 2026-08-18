@@ -35,12 +35,6 @@
 		<dependency>
 			<groupId>org.springframework</groupId>
 			<artifactId>spring-core</artifactId>
-			<exclusions>
-				<exclusion>
-					<groupId>commons-logging</groupId>
-					<artifactId>commons-logging</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework</groupId>
@@ -51,7 +45,7 @@
 		<dependency>
 			<groupId>org.springframework.data</groupId>
 			<artifactId>spring-data-commons</artifactId>
-			<version>4.1.0</version>
+			<version>${springdata.commons}</version>
 		</dependency>
 
 		<!-- Null annotations -->
@@ -101,27 +95,10 @@
 			<version>${webbeans}</version>
 			<scope>test</scope>
 		</dependency>
-
-
-
-		<dependency>
-			<groupId>software.amazon.awssdk</groupId>
-			<artifactId>bom</artifactId>
-			<version>2.21.12</version>
-			<type>pom</type>
-			<scope>import</scope>
-		</dependency>
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>dynamodb</artifactId>
-			<version>2.21.12</version>
-		</dependency>
-
-		<dependency>
-			<groupId>com.amazonaws</groupId>
-			<artifactId>aws-java-sdk-core</artifactId>
-			<version>1.12.159</version>
-			<scope>test</scope>
+			<version>2.48.3</version>
 		</dependency>
 
 		<dependency>

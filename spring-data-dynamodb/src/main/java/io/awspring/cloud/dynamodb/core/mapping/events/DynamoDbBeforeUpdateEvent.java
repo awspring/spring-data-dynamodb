@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.core.mapping.events;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbBeforeUpdateEvent<T> extends DynamoDbMappingEvent<T> {
 	public DynamoDbBeforeUpdateEvent(T source, String tableName) {
 		super(source, tableName);

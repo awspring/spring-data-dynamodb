@@ -20,10 +20,8 @@ import io.awspring.cloud.dynamodb.core.EntityQueryResult;
 import io.awspring.cloud.dynamodb.core.EntityReadResult;
 import io.awspring.cloud.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbScanRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.cloud.dynamodb.request.IndexQueryBuilder;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -35,6 +33,10 @@ import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.repository.query.ParameterAccessor;
 import org.springframework.data.repository.query.RepositoryQuery;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 
 	private final DynamoDbQueryMethod queryMethod;
@@ -102,23 +104,62 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		}
 
 		if (getQueryMethod().isCountQuery()) {
-			return getOperations().count(getDomainClass(), spec.toScanRequest());
+			return countFor(spec);
 		}
 
 		if (getQueryMethod().isExistsQuery()) {
+			return existsFor(spec);
+		}
+
+		DynamoDbQueryExecution execution = getExecution();
+		EntityQueryResult<List<Object>> result = runSpec(spec, getDomainClass(), accessor);
+		return execution.execute(result);
+	}
+
+	private long countFor(DynamoDbQuerySpec spec) {
+
+		if (spec.requiresScan()) {
+			return getOperations().count(getDomainClass(), spec.toScanRequest());
+		}
+
+		return getOperations().count(getDomainClass(), toQueryRequest(spec));
+	}
+
+	private boolean existsFor(DynamoDbQuerySpec spec) {
+
+		if (spec.requiresScan()) {
 			return getOperations().exists(getDomainClass(), spec.toScanRequest());
 		}
 
-		DynamoDbQueryExecution execution = getExecution(spec, getDomainClass());
-		EntityQueryResult<List<Object>> result = runSpec(spec, getDomainClass(), accessor);
-		return execution.execute(result);
+		return getOperations().exists(getDomainClass(), toQueryRequest(spec));
 	}
 
 	@Nullable
 	private Object executeModifying(ParameterAccessor accessor) {
 		ModifyingUpdate update = createUpdateRequest(accessor);
-		return getOperations().update(update.partitionKey(), update.sortKey(), update.request(), getDomainClass())
-				.getEntity();
+		Object updated = getOperations()
+				.update(update.partitionKey(), update.sortKey(), update.request(), getDomainClass()).getEntity();
+		return modifyingResult(updated);
+	}
+
+	@Nullable
+	private Object modifyingResult(@Nullable Object updated) {
+
+		Class<?> returnType = getQueryMethod().getDeclaredReturnType();
+
+		if (void.class.equals(returnType) || Void.class.equals(returnType)) {
+			return null;
+		}
+		if (boolean.class.equals(returnType) || Boolean.class.equals(returnType)) {
+			return Boolean.TRUE;
+		}
+		if (int.class.equals(returnType) || Integer.class.equals(returnType)) {
+			return 1;
+		}
+		if (long.class.equals(returnType) || Long.class.equals(returnType)) {
+			return 1L;
+		}
+		return updated;
 	}
 
 	protected ModifyingUpdate createUpdateRequest(ParameterAccessor accessor) {
@@ -158,114 +199,53 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 				getClass().getSimpleName() + " does not support @Query(partiQl=...) execution.");
 	}
 
-	@SuppressWarnings("unchecked")
 	private EntityQueryResult<List<Object>> runSpec(DynamoDbQuerySpec spec, Class<?> domainClass,
 			ParameterAccessor accessor) {
 
 		Map<String, Object> exclusiveStartKey = exclusiveStartKeyFrom(accessor);
 		Integer limit = resolveLimit(spec, accessor);
 
-		if (spec.requiresRawKeyCondition()) {
-			DynamoDbQueryRequest queryRequest = DynamoDbQueryRequest.Builder.request().withIndexName(spec.indexName())
-					.withKeyConditionExpression(spec.rawKeyConditionExpression())
-					.withFilterExpression(spec.filterExpression())
-					.withExpressionAttributeNames(
-							spec.expressionAttributeNames().isEmpty() ? null : spec.expressionAttributeNames())
-					.withExpressionAttributeValues(
-							spec.expressionAttributeValues().isEmpty() ? null : spec.expressionAttributeValues())
-					.withScanIndexForward(spec.scanIndexForward()).withConsistentRead(spec.consistentRead()).build();
-			DynamoDbPageRequest pageRequest = DynamoDbPageRequest.of(limit, exclusiveStartKey);
-			return (EntityQueryResult<List<Object>>) (EntityQueryResult<?>) getOperations()
-					.query((Class<Object>) domainClass, queryRequest, pageRequest);
+		EntityQueryResult<List<Object>> result = executePage(spec, domainClass, exclusiveStartKey, limit);
+
+		while (getQueryMethod().isScrollQuery() && result.getEntity().isEmpty()) {
+			Map<String, Object> nextStartKey = result.getLastEvaluatedKey();
+			if (nextStartKey == null || nextStartKey.isEmpty()) {
+				break;
+			}
+			result = executePage(spec, domainClass, nextStartKey, limit);
 		}
 
+		return result;
+	}
+
+	@SuppressWarnings("unchecked")
+	private EntityQueryResult<List<Object>> executePage(DynamoDbQuerySpec spec, Class<?> domainClass,
+			@Nullable Map<String, Object> exclusiveStartKey, @Nullable Integer limit) {
+
 		if (spec.requiresScan()) {
-			DynamoDbScanRequest baseRequest = spec.toScanRequest();
-			DynamoDbScanRequest scanRequest = DynamoDbScanRequest.Builder.builder()
-					.withConsistentRead(baseRequest.isConsistentRead())
-					.withExpressionAttributeNames(baseRequest.getExpressionAttributeNames())
-					.withExpressionAttributeValues(baseRequest.getExpressionAttributeValues())
-					.withFilterExpression(baseRequest.getFilterExpression()).withIndexName(baseRequest.getIndexName())
-					.withProjectionExpression(baseRequest.getProjectionExpression())
-					.withExclusiveStartKey(exclusiveStartKey).withLimit(limit).build();
 			return (EntityQueryResult<List<Object>>) (EntityQueryResult<?>) getOperations().scan(domainClass,
-					scanRequest);
+					DynamoDbQuerySpecMapper.toScanRequest(spec, exclusiveStartKey, limit));
+		}
+
+		return (EntityQueryResult<List<Object>>) (EntityQueryResult<?>) getOperations().query(
+				(Class<Object>) domainClass, toQueryRequest(spec), DynamoDbPageRequest.of(limit, exclusiveStartKey));
+	}
+
+	@SuppressWarnings("unchecked")
+	private DynamoDbQueryRequest toQueryRequest(DynamoDbQuerySpec spec) {
+
+		if (spec.requiresRawKeyCondition()) {
+			return DynamoDbQuerySpecMapper.toRawKeyConditionRequest(spec);
 		}
 
 		if (spec.sortConditionIsTemplateColumn()) {
-			return (EntityQueryResult<List<Object>>) (EntityQueryResult<?>) getOperations().query(
-					(Class<Object>) domainClass, buildTemplateSortKeyRequest(spec),
-					DynamoDbPageRequest.of(limit, exclusiveStartKey));
+			return DynamoDbQuerySpecMapper.toTemplateSortKeyRequest(spec);
 		}
 
 		IndexQueryBuilder<Object> builder = (IndexQueryBuilder<Object>) getOperations()
-				.query((Class<Object>) domainClass, spec.indexName());
+				.query((Class<Object>) getDomainClass(), spec.indexName());
 
-		for (Map.Entry<String, Object> partitionEquality : spec.partitionEquals().entrySet()) {
-			builder.partition(partitionEquality.getKey(), partitionEquality.getValue());
-		}
-
-		for (DynamoDbQuerySpec.SortCondition condition : spec.sortConditions()) {
-			switch (condition.op()) {
-			case EQ -> builder.sortEq(condition.columnName(), condition.value());
-			case LT -> builder.sortLt(condition.columnName(), condition.value());
-			case LE -> builder.sortLe(condition.columnName(), condition.value());
-			case GT -> builder.sortGt(condition.columnName(), condition.value());
-			case GE -> builder.sortGe(condition.columnName(), condition.value());
-			case BETWEEN -> builder.sortBetween(condition.columnName(), condition.value(), condition.rangeEnd());
-			case BEGINS_WITH -> builder.sortBeginsWith(condition.columnName(), condition.value());
-			}
-		}
-
-		if (spec.filterExpression() != null) {
-			builder.filterExpression(spec.filterExpression(), spec.expressionAttributeNames(),
-					spec.expressionAttributeValues());
-		}
-
-		builder.scanIndexForward(spec.scanIndexForward());
-		builder.exclusiveStartKey(exclusiveStartKey);
-		builder.limit(limit);
-
-		return (EntityQueryResult<List<Object>>) (EntityQueryResult<?>) builder.execute();
-	}
-
-	private DynamoDbQueryRequest buildTemplateSortKeyRequest(DynamoDbQuerySpec spec) {
-
-		Map<String, String> names = new LinkedHashMap<>(spec.expressionAttributeNames());
-		Map<String, Object> values = new LinkedHashMap<>(spec.expressionAttributeValues());
-		StringBuilder keyCondition = new StringBuilder();
-		int i = 0;
-
-		for (Map.Entry<String, Object> partitionEquality : spec.partitionEquals().entrySet()) {
-			String namePlaceholder = "#tk" + i;
-			String valuePlaceholder = ":tk" + i;
-			names.put(namePlaceholder, partitionEquality.getKey());
-			values.put(valuePlaceholder, partitionEquality.getValue());
-			keyCondition.append(namePlaceholder).append(" = ").append(valuePlaceholder);
-			i++;
-		}
-
-		for (DynamoDbQuerySpec.SortCondition condition : spec.sortConditions()) {
-			String namePlaceholder = "#tk" + i;
-			String valuePlaceholder = ":tk" + i;
-			names.put(namePlaceholder, condition.columnName());
-			values.put(valuePlaceholder, condition.value());
-			keyCondition.append(" AND ");
-			if (condition.op() == DynamoDbQuerySpec.SortCondition.Op.BEGINS_WITH) {
-				keyCondition.append("begins_with(").append(namePlaceholder).append(", ").append(valuePlaceholder)
-						.append(")");
-			}
-			else {
-				keyCondition.append(namePlaceholder).append(" = ").append(valuePlaceholder);
-			}
-			i++;
-		}
-
-		return DynamoDbQueryRequest.Builder.request()
-				.withIndexName(spec.indexName().isEmpty() ? null : spec.indexName())
-				.withKeyConditionExpression(keyCondition.toString()).withFilterExpression(spec.filterExpression())
-				.withExpressionAttributeNames(names).withExpressionAttributeValues(values)
-				.withScanIndexForward(spec.scanIndexForward()).withConsistentRead(spec.consistentRead()).build();
+		return DynamoDbQuerySpecMapper.applyTo(builder, spec, null, null).build();
 	}
 
 	@Nullable
@@ -275,11 +255,19 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 			return null;
 		}
 		if (scrollPosition instanceof KeysetScrollPosition keysetScrollPosition) {
-			return (Map<String, Object>) keysetScrollPosition.getKeys();
+			if (keysetScrollPosition.scrollsBackward()) {
+				throw new InvalidDataAccessApiUsageException(
+						"DynamoDB pagination only scrolls forward: a backward keyset position would have to re-run the "
+								+ "query with an inverted ScanIndexForward, which no DynamoDB resume cursor supports. "
+								+ "Use ScrollPosition.keyset() or ScrollPosition.forward(...) -- the position handed "
+								+ "out by Window.positionAt(window.size() - 1) is always a forward one. Method: "
+								+ getQueryMethod());
+			}
+			return keysetScrollPosition.getKeys();
 		}
 		throw new InvalidDataAccessApiUsageException("DynamoDB pagination only supports a keyset ScrollPosition -- got "
 				+ scrollPosition.getClass().getSimpleName()
-				+ ". Use ScrollPosition.keyset()/forward(...)/backward(...), not an offset position "
+				+ ". Use ScrollPosition.keyset()/forward(...), not an offset position "
 				+ "(DynamoDB has no numeric row offset).");
 	}
 
@@ -289,7 +277,7 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		return limit != null && limit.isLimited() ? limit.max() : null;
 	}
 
-	private DynamoDbQueryExecution getExecution(DynamoDbQuerySpec spec, Class<?> domainClass) {
+	private DynamoDbQueryExecution getExecution() {
 
 		if (getQueryMethod().isCollectionQuery()) {
 			return new DynamoDbQueryExecution.CollectionExecution();

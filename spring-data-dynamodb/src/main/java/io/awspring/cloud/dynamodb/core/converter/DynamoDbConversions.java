@@ -22,6 +22,10 @@ import java.util.List;
 import org.springframework.data.convert.CustomConversions;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbConversions extends CustomConversions {
 
 	private static final StoreConversions STORE_CONVERSIONS;

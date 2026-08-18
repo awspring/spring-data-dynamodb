@@ -13,10 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.cloud.dynamodb.request;
+package io.awspring.spring.data.dynamodb.repository;
 
-@FunctionalInterface
-public interface DynamoDbScanRequestInterface {
+import io.awspring.cloud.dynamodb.repository.DynamoDbCompositeId;
+import io.awspring.cloud.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.model.Order;
+import org.springframework.stereotype.Repository;
 
-	DynamoDbScanRequest build(DynamoDbScanRequest.Builder builder);
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+@Repository
+public interface OrderRepository extends DynamoDbRepository<Order, DynamoDbCompositeId> {
 }

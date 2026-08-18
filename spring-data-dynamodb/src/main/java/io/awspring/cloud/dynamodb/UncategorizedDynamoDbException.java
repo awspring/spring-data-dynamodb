@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.UncategorizedDataAccessException;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @SuppressWarnings("serial")
 public class UncategorizedDynamoDbException extends UncategorizedDataAccessException {
 

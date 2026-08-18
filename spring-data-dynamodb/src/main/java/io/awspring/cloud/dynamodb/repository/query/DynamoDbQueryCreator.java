@@ -20,6 +20,8 @@ import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.cloud.dynamodb.core.mapping.IndexKeySchema;
 import io.awspring.cloud.dynamodb.core.mapping.KeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.KeyTemplateResolver;
+import io.awspring.cloud.dynamodb.repository.query.DynamoDbQuerySpec.SortCondition;
+import io.awspring.cloud.dynamodb.repository.query.DynamoDbQuerySpec.SortCondition.Op;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -39,7 +41,14 @@ import org.springframework.data.repository.query.parser.AbstractQueryCreator;
 import org.springframework.data.repository.query.parser.Part;
 import org.springframework.data.repository.query.parser.PartTree;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec, DynamoDbQuerySpec> {
+
+	private static final String ALWAYS_FALSE = "attribute_exists(nonexistent_attribute_for_empty_in)";
+	private static final String ALWAYS_TRUE = "attribute_not_exists(nonexistent_attribute_for_empty_in)";
 
 	private final PartTree tree;
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
@@ -145,12 +154,11 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 			boolean allPlaceholdersBound = placeholderValues.size() == placeholderNames.size();
 			if (allPlaceholdersBound) {
 				Object composedKey = placeholderValues.containsValue(null) ? null : template.compose(placeholderValues);
-				spec.sortConditions().add(new DynamoDbQuerySpec.SortCondition(sortColumn,
-						DynamoDbQuerySpec.SortCondition.Op.EQ, composedKey, null));
+				spec.sortConditions().add(new SortCondition(sortColumn, Op.EQ, composedKey, null));
 			}
 			else {
-				spec.sortConditions().add(new DynamoDbQuerySpec.SortCondition(sortColumn,
-						DynamoDbQuerySpec.SortCondition.Op.BEGINS_WITH, template.prefixFor(placeholderValues), null));
+				spec.sortConditions().add(
+						new SortCondition(sortColumn, Op.BEGINS_WITH, template.prefixFor(placeholderValues), null));
 			}
 		}
 
@@ -187,22 +195,30 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 
 		List<Atom> equalityAtoms = new ArrayList<>();
 		List<FixedFragment> fixedFilterFragments = new ArrayList<>();
+		PendingSortRange pendingSortRange = null;
 
 		if (!orParts.isEmpty()) {
 			for (Part part : orParts.get(0)) {
 				if (part.getType() == Part.Type.SIMPLE_PROPERTY) {
 					equalityAtoms.add(bindEqualityAtom(part, parameters));
+					continue;
 				}
-				else {
-					DynamoDbQuerySpec staging = DynamoDbQuerySpec.forScan();
-					String fragment = consumeAsFilterFragment(part, parameters, staging);
-					fixedFilterFragments.add(new FixedFragment(fragment, staging.expressionAttributeNames(),
-							staging.expressionAttributeValues()));
+
+				Op rangeOp = rangeOpFor(part.getType());
+				if (rangeOp != null && pendingSortRange == null
+						&& isLeadingSortKeyColumn(entity, columnNameFor(part))) {
+					pendingSortRange = bindSortRange(part, rangeOp, parameters);
+					continue;
 				}
+
+				DynamoDbQuerySpec staging = DynamoDbQuerySpec.forScan();
+				String fragment = consumeAsFilterFragment(part, parameters, staging);
+				fixedFilterFragments.add(new FixedFragment(fragment, staging.expressionAttributeNames(),
+						staging.expressionAttributeValues()));
 			}
 		}
 
-		DynamoDbQuerySpec spec = selectCandidateIndex(entity, equalityAtoms);
+		DynamoDbQuerySpec spec = selectCandidateIndex(entity, equalityAtoms, pendingSortRange);
 
 		for (FixedFragment fragment : fixedFilterFragments) {
 			spec.filterFragments().add(fragment.text());
@@ -216,7 +232,8 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 	private record FixedFragment(String text, Map<String, String> names, Map<String, Object> values) {
 	}
 
-	private DynamoDbQuerySpec selectCandidateIndex(DynamoDbPersistentEntity<?> entity, List<Atom> equalityAtoms) {
+	private DynamoDbQuerySpec selectCandidateIndex(DynamoDbPersistentEntity<?> entity, List<Atom> equalityAtoms,
+			@Nullable PendingSortRange pendingSortRange) {
 
 		Map<String, Atom> atomsByColumn = new LinkedHashMap<>();
 		for (Atom atom : equalityAtoms) {
@@ -245,9 +262,19 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 					if (atom == null) {
 						break;
 					}
-					spec.sortConditions().add(new DynamoDbQuerySpec.SortCondition(sortColumn,
-							DynamoDbQuerySpec.SortCondition.Op.EQ, atom.value(), null));
+					spec.sortConditions().add(new SortCondition(sortColumn, Op.EQ, atom.value(), null));
 					consumedColumns.add(sortColumn);
+				}
+
+				if (pendingSortRange != null) {
+					if (consumedColumns.contains(pendingSortRange.columnName())) {
+						addFragment(spec, pendingSortRange.fallback());
+					}
+					else {
+						spec.sortConditions().add(new SortCondition(pendingSortRange.columnName(),
+								pendingSortRange.op(), pendingSortRange.value(), pendingSortRange.rangeEnd()));
+						consumedColumns.add(pendingSortRange.columnName());
+					}
 				}
 
 				for (Atom atom : equalityAtoms) {
@@ -271,7 +298,75 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 			scanSpec.expressionAttributeNames().put(atom.namePlaceholder(), atom.columnName());
 			scanSpec.expressionAttributeValues().put(atom.valuePlaceholder(), atom.value());
 		}
+		if (pendingSortRange != null) {
+			addFragment(scanSpec, pendingSortRange.fallback());
+		}
 		return scanSpec;
+	}
+
+	private static void addFragment(DynamoDbQuerySpec spec, FixedFragment fragment) {
+		spec.filterFragments().add(fragment.text());
+		spec.expressionAttributeNames().putAll(fragment.names());
+		spec.expressionAttributeValues().putAll(fragment.values());
+	}
+
+	private record PendingSortRange(String columnName, Op op, Object value, @Nullable Object rangeEnd,
+			FixedFragment fallback) {
+	}
+
+	@Nullable
+	private static Op rangeOpFor(Part.Type type) {
+		return switch (type) {
+		case GREATER_THAN, AFTER -> Op.GT;
+		case GREATER_THAN_EQUAL -> Op.GE;
+		case LESS_THAN, BEFORE -> Op.LT;
+		case LESS_THAN_EQUAL -> Op.LE;
+		case BETWEEN -> Op.BETWEEN;
+		case STARTING_WITH -> Op.BEGINS_WITH;
+		default -> null;
+		};
+	}
+
+	private boolean isLeadingSortKeyColumn(DynamoDbPersistentEntity<?> entity, String columnName) {
+		IndexKeySchema schema = entity.getKeySchema();
+		if (schema.isEmpty()) {
+			return false;
+		}
+		List<DynamoDbPersistentProperty> sortKeys = schema.sortKeys();
+		return !sortKeys.isEmpty() && sortKeys.get(0).getColumnName().equals(columnName);
+	}
+
+	private PendingSortRange bindSortRange(Part part, Op op,
+			Iterator<Object> parameters) {
+
+		String columnName = columnNameFor(part);
+		String namePlaceholder = "#p" + placeholderIndex;
+		String valueSlot = ":p" + placeholderIndex;
+		placeholderIndex++;
+
+		Object value = parameters.next();
+		Object rangeEnd = (op == Op.BETWEEN) ? parameters.next() : null;
+
+		Map<String, String> names = new LinkedHashMap<>();
+		names.put(namePlaceholder, columnName);
+		Map<String, Object> values = new LinkedHashMap<>();
+		values.put(valueSlot, value);
+
+		String text = switch (op) {
+			case GT -> namePlaceholder + " > " + valueSlot;
+			case GE -> namePlaceholder + " >= " + valueSlot;
+			case LT -> namePlaceholder + " < " + valueSlot;
+			case LE -> namePlaceholder + " <= " + valueSlot;
+			case BEGINS_WITH -> "begins_with(" + namePlaceholder + ", " + valueSlot + ")";
+			case BETWEEN -> {
+				String endSlot = valueSlot + "_1";
+				values.put(endSlot, rangeEnd);
+				yield namePlaceholder + " BETWEEN " + valueSlot + " AND " + endSlot;
+			}
+			case EQ -> namePlaceholder + " = " + valueSlot;
+		};
+
+		return new PendingSortRange(columnName, op, value, rangeEnd, new FixedFragment(text, names, values));
 	}
 
 	private static Set<String> columnNames(List<DynamoDbPersistentProperty> properties) {
@@ -302,29 +397,32 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 		String columnName = columnNameFor(part);
 		String namePlaceholder = "#p" + placeholderIndex;
 		target.expressionAttributeNames().put(namePlaceholder, columnName);
+		String valueSlot = "p" + placeholderIndex;
 		placeholderIndex++;
 
 		return switch (part.getType()) {
-			case SIMPLE_PROPERTY -> namePlaceholder + " = " + nextValuePlaceholder(parameters, target);
-			case NEGATING_SIMPLE_PROPERTY -> namePlaceholder + " <> " + nextValuePlaceholder(parameters, target);
-			case GREATER_THAN, AFTER -> namePlaceholder + " > " + nextValuePlaceholder(parameters, target);
-			case GREATER_THAN_EQUAL -> namePlaceholder + " >= " + nextValuePlaceholder(parameters, target);
-			case LESS_THAN, BEFORE -> namePlaceholder + " < " + nextValuePlaceholder(parameters, target);
-			case LESS_THAN_EQUAL -> namePlaceholder + " <= " + nextValuePlaceholder(parameters, target);
+			case SIMPLE_PROPERTY -> namePlaceholder + " = " + nextValuePlaceholder(valueSlot, parameters, target);
+			case NEGATING_SIMPLE_PROPERTY ->
+					namePlaceholder + " <> " + nextValuePlaceholder(valueSlot, parameters, target);
+			case GREATER_THAN, AFTER -> namePlaceholder + " > " + nextValuePlaceholder(valueSlot, parameters, target);
+			case GREATER_THAN_EQUAL -> namePlaceholder + " >= " + nextValuePlaceholder(valueSlot, parameters, target);
+			case LESS_THAN, BEFORE -> namePlaceholder + " < " + nextValuePlaceholder(valueSlot, parameters, target);
+			case LESS_THAN_EQUAL -> namePlaceholder + " <= " + nextValuePlaceholder(valueSlot, parameters, target);
 			case BETWEEN -> {
-				String start = nextValuePlaceholder(parameters, target);
-				String end = nextValuePlaceholder(parameters, target);
+				String start = nextValuePlaceholder(valueSlot, parameters, target);
+				String end = nextValuePlaceholder(valueSlot, parameters, target);
 				yield namePlaceholder + " BETWEEN " + start + " AND " + end;
 			}
-			case STARTING_WITH ->
-					"begins_with(" + namePlaceholder + ", " + nextValuePlaceholder(parameters, target) + ")";
-			case CONTAINING -> "contains(" + namePlaceholder + ", " + nextValuePlaceholder(parameters, target) + ")";
-			case NOT_CONTAINING ->
-					"NOT contains(" + namePlaceholder + ", " + nextValuePlaceholder(parameters, target) + ")";
-			case IN -> namePlaceholder + " IN (" + expandInValuePlaceholders(parameters, target) + ")";
-			case NOT_IN -> "NOT (" + namePlaceholder + " IN (" + expandInValuePlaceholders(parameters, target) + "))";
-			case TRUE -> namePlaceholder + " = " + literalPlaceholder("true", Boolean.TRUE, target);
-			case FALSE -> namePlaceholder + " = " + literalPlaceholder("false", Boolean.FALSE, target);
+			case STARTING_WITH -> "begins_with(" + namePlaceholder + ", "
+					+ nextValuePlaceholder(valueSlot, parameters, target) + ")";
+			case CONTAINING ->
+					"contains(" + namePlaceholder + ", " + nextValuePlaceholder(valueSlot, parameters, target) + ")";
+			case NOT_CONTAINING -> "NOT contains(" + namePlaceholder + ", "
+					+ nextValuePlaceholder(valueSlot, parameters, target) + ")";
+			case IN -> inFragment(namePlaceholder, valueSlot, parameters, target, false);
+			case NOT_IN -> inFragment(namePlaceholder, valueSlot, parameters, target, true);
+			case TRUE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "true", Boolean.TRUE, target);
+			case FALSE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "false", Boolean.FALSE, target);
 			case IS_NULL -> "attribute_not_exists(" + namePlaceholder + ")";
 			case IS_NOT_NULL -> "attribute_exists(" + namePlaceholder + ")";
 			case IS_EMPTY, IS_NOT_EMPTY ->
@@ -339,24 +437,36 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 		};
 	}
 
-	private String nextValuePlaceholder(Iterator<Object> parameters, DynamoDbQuerySpec target) {
-		String placeholder = ":p" + (placeholderIndex - 1);
+	private String nextValuePlaceholder(String valueSlot, Iterator<Object> parameters, DynamoDbQuerySpec target) {
+		String placeholder = ":" + valueSlot;
+		int occurrence = 1;
+		while (target.expressionAttributeValues().containsKey(placeholder)) {
+			placeholder = ":" + valueSlot + "_" + occurrence;
+			occurrence++;
+		}
 		target.expressionAttributeValues().put(placeholder, parameters.next());
 		return placeholder;
 	}
 
-	private String expandInValuePlaceholders(Iterator<Object> parameters, DynamoDbQuerySpec target) {
+	private String inFragment(String namePlaceholder, String valueSlot, Iterator<Object> parameters,
+			DynamoDbQuerySpec target, boolean negated) {
+
 		Object bound = parameters.next();
 		List<Object> elements = toElementList(bound);
 
-		int slot = placeholderIndex - 1;
+		if (elements.isEmpty()) {
+			target.expressionAttributeNames().remove(namePlaceholder);
+			return negated ? ALWAYS_TRUE : ALWAYS_FALSE;
+		}
+
 		List<String> placeholders = new ArrayList<>(elements.size());
 		for (int i = 0; i < elements.size(); i++) {
-			String placeholder = ":p" + slot + indexSuffix(i);
+			String placeholder = ":" + valueSlot + indexSuffix(i);
 			target.expressionAttributeValues().put(placeholder, elements.get(i));
 			placeholders.add(placeholder);
 		}
-		return String.join(", ", placeholders);
+		String in = namePlaceholder + " IN (" + String.join(", ", placeholders) + ")";
+		return negated ? "NOT (" + in + ")" : in;
 	}
 
 	private static List<Object> toElementList(@Nullable Object bound) {
@@ -388,8 +498,8 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 		return suffix.toString();
 	}
 
-	private String literalPlaceholder(String suffix, Object literalValue, DynamoDbQuerySpec target) {
-		String placeholder = ":p" + (placeholderIndex - 1) + suffix;
+	private String literalPlaceholder(String valueSlot, String suffix, Object literalValue, DynamoDbQuerySpec target) {
+		String placeholder = ":" + valueSlot + suffix;
 		target.expressionAttributeValues().put(placeholder, literalValue);
 		return placeholder;
 	}

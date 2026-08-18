@@ -20,6 +20,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class PlayerProfile {
 
 	@Column("contactHandle")

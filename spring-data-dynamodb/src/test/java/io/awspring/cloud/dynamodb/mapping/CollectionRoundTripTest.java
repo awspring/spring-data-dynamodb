@@ -23,10 +23,17 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class CollectionRoundTripTest {
+class CollectionRoundTripTest {
+
+	private static final String ID_SET = "test-1";
+	private static final String ID_LIST = "test-2";
+	private static final String ID_BOTH = "test-3";
+	private static final String ID_EMPTY = "test-4";
 
 	@Table(tableName = "test_collections")
 	static class EntityWithCollections {
@@ -61,83 +68,101 @@ public class CollectionRoundTripTest {
 		}
 	}
 
-	private DynamoDbMappingContext mappingContext;
 	private MappingDynamoDbConverter converter;
 
 	@BeforeEach
 	void setUp() {
-		this.mappingContext = new DynamoDbMappingContext();
+		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
 		this.converter = new MappingDynamoDbConverter(mappingContext);
 		this.converter.afterPropertiesSet();
 	}
 
-	@Test
-	void setOfIntegersRoundTripsCorrectly() {
-		EntityWithCollections original = new EntityWithCollections("test-1", Set.of(1, 2, 3), null);
+	@Nested
+	@DisplayName("Set round-trip")
+	class SetRoundTrip {
 
-		Map<String, AttributeValue> attributeMap = new HashMap<>();
-		converter.write(original, attributeMap);
+		@Test
+		@DisplayName("Set of integers round-trips correctly")
+		void setOfIntegers_roundTrips() {
+			EntityWithCollections original = new EntityWithCollections(ID_SET, Set.of(1, 2, 3), null);
 
-		EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+			Map<String, AttributeValue> attributeMap = new HashMap<>();
+			converter.write(original, attributeMap);
 
-		assertNotNull(restored);
-		assertEquals(original.id, restored.id);
-		assertNotNull(restored.integerSet);
-		assertEquals(3, restored.integerSet.size());
-		assertTrue(restored.integerSet.contains(1));
-		assertTrue(restored.integerSet.contains(2));
-		assertTrue(restored.integerSet.contains(3));
-		restored.integerSet.forEach(val -> assertInstanceOf(Integer.class, val));
+			EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+
+			assertAll("set round-trip", () -> assertNotNull(restored), () -> assertEquals(original.id, restored.id),
+					() -> assertNotNull(restored.integerSet), () -> assertEquals(3, restored.integerSet.size()),
+					() -> assertTrue(restored.integerSet.contains(1)),
+					() -> assertTrue(restored.integerSet.contains(2)),
+					() -> assertTrue(restored.integerSet.contains(3)));
+			restored.integerSet.forEach(val -> assertInstanceOf(Integer.class, val));
+		}
 	}
 
-	@Test
-	void listOfIntegersRoundTripsCorrectly() {
-		EntityWithCollections original = new EntityWithCollections("test-2", null, List.of(4, 5, 6));
+	@Nested
+	@DisplayName("List round-trip")
+	class ListRoundTrip {
 
-		Map<String, AttributeValue> attributeMap = new HashMap<>();
-		converter.write(original, attributeMap);
+		@Test
+		@DisplayName("List of integers round-trips correctly")
+		void listOfIntegers_roundTrips() {
+			EntityWithCollections original = new EntityWithCollections(ID_LIST, null, List.of(4, 5, 6));
 
-		EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+			Map<String, AttributeValue> attributeMap = new HashMap<>();
+			converter.write(original, attributeMap);
 
-		assertNotNull(restored);
-		assertEquals(original.id, restored.id);
-		assertNotNull(restored.integerList);
-		assertEquals(List.of(4, 5, 6), restored.integerList);
-		restored.integerList.forEach(val -> assertInstanceOf(Integer.class, val));
+			EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+
+			assertAll("list round-trip", () -> assertNotNull(restored), () -> assertEquals(original.id, restored.id),
+					() -> assertNotNull(restored.integerList),
+					() -> assertEquals(List.of(4, 5, 6), restored.integerList));
+			restored.integerList.forEach(val -> assertInstanceOf(Integer.class, val));
+		}
 	}
 
-	@Test
-	void bothCollectionsRoundTripCorrectly() {
-		EntityWithCollections original = new EntityWithCollections("test-3",
-				new LinkedHashSet<>(Arrays.asList(10, 20, 30)), new ArrayList<>(Arrays.asList(100, 200, 300)));
+	@Nested
+	@DisplayName("Both collections")
+	class BothCollections {
 
-		Map<String, AttributeValue> attributeMap = new HashMap<>();
-		converter.write(original, attributeMap);
+		@Test
+		@DisplayName("Both set and list round-trip correctly together")
+		void bothCollections_roundTrip() {
+			EntityWithCollections original = new EntityWithCollections(ID_BOTH,
+					new LinkedHashSet<>(Arrays.asList(10, 20, 30)), new ArrayList<>(Arrays.asList(100, 200, 300)));
 
-		EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+			Map<String, AttributeValue> attributeMap = new HashMap<>();
+			converter.write(original, attributeMap);
 
-		assertNotNull(restored);
-		assertEquals(original.id, restored.id);
-		assertEquals(original.integerSet, restored.integerSet);
-		assertEquals(original.integerList, restored.integerList);
-		restored.integerSet.forEach(val -> assertInstanceOf(Integer.class, val));
-		restored.integerList.forEach(val -> assertInstanceOf(Integer.class, val));
+			EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+
+			assertAll("both collections round-trip", () -> assertNotNull(restored),
+					() -> assertEquals(original.id, restored.id),
+					() -> assertEquals(original.integerSet, restored.integerSet),
+					() -> assertEquals(original.integerList, restored.integerList));
+			restored.integerSet.forEach(val -> assertInstanceOf(Integer.class, val));
+			restored.integerList.forEach(val -> assertInstanceOf(Integer.class, val));
+		}
 	}
 
-	@Test
-	void emptyCollectionsRoundTripCorrectly() {
-		EntityWithCollections original = new EntityWithCollections("test-4", new HashSet<>(), new ArrayList<>());
+	@Nested
+	@DisplayName("Empty collections")
+	class EmptyCollections {
 
-		Map<String, AttributeValue> attributeMap = new HashMap<>();
-		converter.write(original, attributeMap);
+		@Test
+		@DisplayName("Empty collections round-trip correctly")
+		void emptyCollections_roundTrip() {
+			EntityWithCollections original = new EntityWithCollections(ID_EMPTY, new HashSet<>(), new ArrayList<>());
 
-		EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+			Map<String, AttributeValue> attributeMap = new HashMap<>();
+			converter.write(original, attributeMap);
 
-		assertNotNull(restored);
-		assertEquals(original.id, restored.id);
-		assertNotNull(restored.integerSet);
-		assertNotNull(restored.integerList);
-		assertTrue(restored.integerSet.isEmpty());
-		assertTrue(restored.integerList.isEmpty());
+			EntityWithCollections restored = converter.read(EntityWithCollections.class, attributeMap);
+
+			assertAll("empty collections round-trip", () -> assertNotNull(restored),
+					() -> assertEquals(original.id, restored.id), () -> assertNotNull(restored.integerSet),
+					() -> assertNotNull(restored.integerList), () -> assertTrue(restored.integerSet.isEmpty()),
+					() -> assertTrue(restored.integerList.isEmpty()));
+		}
 	}
 }

@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.core.mapping;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.mapping.PersistentEntity;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbPersistentEntity<T> extends PersistentEntity<T, DynamoDbPersistentProperty> {
 
 	String getTableName();
@@ -33,4 +37,14 @@ public interface DynamoDbPersistentEntity<T> extends PersistentEntity<T, DynamoD
 	@Nullable
 	String getIndexName();
 
+	boolean isAggregateView();
+
+	@Nullable
+	String getAggregatePartitionKeyColumn();
+
+	@Nullable
+	String getAggregateSortKeyColumn();
+
+	@Nullable
+	String getAggregateIndexName();
 }

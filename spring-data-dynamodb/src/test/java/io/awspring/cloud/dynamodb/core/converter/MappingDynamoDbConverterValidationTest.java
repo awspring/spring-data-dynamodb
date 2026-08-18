@@ -26,11 +26,13 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class MappingDynamoDbConverterValidationTest {
+@DisplayName("MappingDynamoDbConverter -- read/write validation and enum handling")
+class MappingDynamoDbConverterValidationTest {
 
 	private DynamoDbMappingContext mappingContext;
 	private MappingDynamoDbConverter converter;

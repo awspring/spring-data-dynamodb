@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +29,8 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.repository.AllowScan;
 import java.lang.reflect.Method;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.projection.ProjectionFactory;
@@ -36,10 +39,15 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
 
-public class SortKeyTemplateD1EagerCheckTest {
+@DisplayName("SortKeyTemplate D1 eager scan check")
+class SortKeyTemplateD1EagerCheckTest {
 
-	@Table(tableName = "orders")
-	@SortKeyTemplate("MATCH#{year}#{round}")
+	private static final String TABLE_NAME = "orders";
+	private static final String SORT_KEY_TEMPLATE = "MATCH#{year}#{round}";
+	private static final String ROUND_VALUE = "QUARTERFINAL";
+
+	@Table(tableName = TABLE_NAME)
+	@SortKeyTemplate(SORT_KEY_TEMPLATE)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -79,48 +87,71 @@ public class SortKeyTemplateD1EagerCheckTest {
 		return new DynamoDbQueryMethod(method, metadata, projectionFactory, mappingContext);
 	}
 
-	@Test
-	void partitionKeyAloneConstructsWithoutAllowScan() throws NoSuchMethodException {
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
-		assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
+	@Nested
+	@DisplayName("Methods that construct without @AllowScan (index-servable)")
+	class IndexServableTests {
+
+		@Test
+		@DisplayName("partition key alone constructs without @AllowScan")
+		void partitionKeyAloneConstructsWithoutAllowScan() throws NoSuchMethodException {
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
+
+			assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
+		}
+
+		@Test
+		@DisplayName("partition + leading template placeholder constructs without @AllowScan")
+		void partitionPlusLeadingTemplatePlaceholderConstructsWithoutAllowScan() throws NoSuchMethodException {
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndYear", String.class, int.class);
+
+			assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
+		}
+
+		@Test
+		@DisplayName("all template placeholders bound constructs without @AllowScan")
+		void allTemplatePlaceholdersBoundConstructsWithoutAllowScan() throws NoSuchMethodException {
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndYearAndRound", String.class,
+					int.class, String.class);
+
+			assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
+		}
 	}
 
-	@Test
-	void partitionPlusLeadingTemplatePlaceholderConstructsWithoutAllowScan() throws NoSuchMethodException {
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndYear", String.class, int.class);
-		assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
-	}
+	@Nested
+	@DisplayName("Scan-requiring methods")
+	class ScanRequiringTests {
 
-	@Test
-	void allTemplatePlaceholdersBoundConstructsWithoutAllowScan() throws NoSuchMethodException {
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndYearAndRound", String.class, int.class,
-				String.class);
-		assertNotNull(new PartTreeDynamoDbQuery(queryMethod, newOperations()));
-	}
+		@Test
+		@DisplayName("fails at construction (not at first invocation) without @AllowScan")
+		void scanRequiringMethodWithoutAllowScanFailsAtConstructionNotAtFirstInvocation() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = newOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByRound", String.class);
 
-	@Test
-	void scanRequiringMethodWithoutAllowScanFailsAtConstructionNotAtFirstInvocation() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = newOperations();
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByRound", String.class);
+			// Act & Assert
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> new PartTreeDynamoDbQuery(queryMethod, operations));
+			assertAll(() -> assertTrue(ex.getMessage().contains("AllowScan")),
+					() -> assertNull(operations.lastCapturedRequest),
+					() -> assertNull(operations.lastCapturedScanRequest));
+		}
 
-		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> new PartTreeDynamoDbQuery(queryMethod, operations));
-		assertTrue(ex.getMessage().contains("AllowScan"));
-		assertNull(operations.lastCapturedRequest);
-		assertNull(operations.lastCapturedScanRequest);
-	}
+		@Test
+		@DisplayName("constructs and executes as a scan with @AllowScan present")
+		void scanRequiringMethodWithAllowScanConstructsAndExecutesAsAScan() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = newOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findAllowedByRound", String.class);
 
-	@Test
-	void scanRequiringMethodWithAllowScanConstructsAndExecutesAsAScan() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = newOperations();
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findAllowedByRound", String.class);
+			// Act
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+			query.execute(new Object[] { ROUND_VALUE });
 
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
-
-		query.execute(new Object[] { "QUARTERFINAL" });
-
-		assertNotNull(operations.lastCapturedScanRequest);
-		assertNotNull(operations.lastCapturedScanRequest.getFilterExpression());
-		assertTrue(operations.lastCapturedScanRequest.getExpressionAttributeValues().containsValue("QUARTERFINAL"));
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedScanRequest),
+					() -> assertNotNull(operations.lastCapturedScanRequest.getFilterExpression()),
+					() -> assertTrue(operations.lastCapturedScanRequest.getExpressionAttributeValues()
+							.containsValue(ROUND_VALUE)));
+		}
 	}
 }

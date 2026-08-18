@@ -18,6 +18,7 @@ package io.awspring.cloud.dynamodb.core.mapping;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanClassLoaderAware;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -26,17 +27,19 @@ import org.springframework.data.mapping.context.AbstractMappingContext;
 import org.springframework.data.mapping.model.Property;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbMappingContext
 		extends AbstractMappingContext<BasicDynamoDbPersistentEntity<?>, DynamoDbPersistentProperty>
 		implements ApplicationContextAware, BeanClassLoaderAware {
 
 	private @Nullable ApplicationContext applicationContext;
 
-	private @Nullable ClassLoader beanClassLoader;
+	private final DynamoDbPersistentEntityMetadataVerifier verifier = new CompositeDynamoDbPersistentEntityMetadataVerifier();
 
-	private DynamoDbPersistentEntityMetadataVerifier verifier = new CompositeDynamoDbPersistentEntityMetadataVerifier();
-
-	private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
+	private final NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
 
 	private final Map<String, Set<DynamoDbPersistentEntity<?>>> entitySetsByTableName = new ConcurrentHashMap<>();
 
@@ -51,7 +54,7 @@ public class DynamoDbMappingContext
 
 		optional.ifPresent(entity -> {
 
-			if (!entity.isSecondaryIndexView()) {
+			if (!entity.isSecondaryIndexView() && !entity.isAggregateView()) {
 				Set<DynamoDbPersistentEntity<?>> entities = this.entitySetsByTableName
 						.computeIfAbsent(entity.getTableName(), string -> ConcurrentHashMap.newKeySet());
 				entities.add(entity);
@@ -64,20 +67,18 @@ public class DynamoDbMappingContext
 	}
 
 	@Override
-	public void setApplicationContext(ApplicationContext applicationContext)
-			throws org.springframework.beans.BeansException {
+	public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
 		super.setApplicationContext(applicationContext);
 		this.applicationContext = applicationContext;
 	}
 
 	@Override
 	public void setBeanClassLoader(ClassLoader classLoader) {
-		this.beanClassLoader = classLoader;
 	}
 
 	@Override
 	protected <T> BasicDynamoDbPersistentEntity<?> createPersistentEntity(TypeInformation<T> typeInformation) {
-		BasicDynamoDbPersistentEntity<T> entity = new BasicDynamoDbPersistentEntity<T>(typeInformation, getVerifier());
+		BasicDynamoDbPersistentEntity<T> entity = new BasicDynamoDbPersistentEntity<>(typeInformation, getVerifier());
 
 		entity.setMappingContext(this);
 		Optional.ofNullable(this.applicationContext).ifPresent(entity::setApplicationContext);
@@ -100,10 +101,6 @@ public class DynamoDbMappingContext
 
 	public DynamoDbPersistentEntityMetadataVerifier getVerifier() {
 		return this.verifier;
-	}
-
-	public Collection<BasicDynamoDbPersistentEntity<?>> getTableEntities() {
-		return Collections.unmodifiableCollection(this.tableEntities);
 	}
 
 	public Set<String> distinctBaseTableNames() {

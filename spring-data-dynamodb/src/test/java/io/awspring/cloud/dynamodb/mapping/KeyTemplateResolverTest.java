@@ -15,11 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
@@ -28,11 +24,21 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.Map;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.data.mapping.MappingException;
 
-public class KeyTemplateResolverTest {
+class KeyTemplateResolverTest {
+
+	private static final String COLUMN_SK = "sk";
+	private static final String COLUMN_GSI1SK = "gsi1sk";
+	private static final String TOURNAMENT_ID = "cust-1";
+	private static final int YEAR_2024 = 2024;
+	private static final int YEAR_2025 = 2025;
+	private static final String ROUND_QUARTERFINAL = "QUARTERFINAL";
+	private static final String COMPOSED_SK = "MATCH#2024#QUARTERFINAL";
 
 	@Table(tableName = "orders")
 	@SortKeyTemplate("MATCH#{year}#{round}")
@@ -72,90 +78,139 @@ public class KeyTemplateResolverTest {
 		return mappingContext.getRequiredPersistentEntity(type);
 	}
 
-	@Test
-	void composesTheBaseTableSortKeyFromBoundProperties() {
-		DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+	@Nested
+	@DisplayName("Compose")
+	class Compose {
 
-		Match match = new Match("cust-1", 2024, "QUARTERFINAL");
-		String sortKey = resolver.compose("sk", match, new DefaultConversionService());
+		@Test
+		@DisplayName("Composes the base-table sort key from bound properties")
+		void compose_boundProperties_producesExpectedKey() {
+			DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
 
-		assertEquals("MATCH#2024#QUARTERFINAL", sortKey);
-		assertEquals("sk", resolver.columnFor("sk"));
-	}
+			Match match = new Match(TOURNAMENT_ID, YEAR_2024, ROUND_QUARTERFINAL);
 
-	@Test
-	void decomposesThePhysicalStringBackOntoTheInstancesProperties() {
-		DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+			String sortKey = resolver.compose(COLUMN_SK, match, new DefaultConversionService());
 
-		Match reconstructed = new Match();
-		reconstructed.tournamentId = "cust-1";
-		resolver.decomposeOnto("sk", "MATCH#2024#QUARTERFINAL", reconstructed, new DefaultConversionService());
-
-		assertEquals(2024, reconstructed.year);
-		assertEquals("QUARTERFINAL", reconstructed.round);
-	}
-
-	@Test
-	void composeThenDecomposeRoundTripsToTheSameValues() {
-		DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
-
-		Match original = new Match("cust-1", 2025, "PENDING");
-		String composed = resolver.compose("sk", original, new DefaultConversionService());
-
-		Match reconstructed = new Match();
-		resolver.decomposeOnto("sk", composed, reconstructed, new DefaultConversionService());
-
-		assertEquals(original.year, reconstructed.year);
-		assertEquals(original.round, reconstructed.round);
-	}
-
-	@Test
-	void anEntityWithNoSortKeyTemplateHasNoTemplateForAnyIndex() {
-		DynamoDbPersistentEntity<?> entity = entityFor(PlainEntity.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
-
-		assertFalse(resolver.hasTemplate("sk"));
-		assertNull(resolver.templateFor("sk"));
-		assertNull(resolver.compose("sk", new PlainEntity(), new DefaultConversionService()));
-	}
-
-	@Test
-	void aTemplateCanTargetAnOverloadedColumnOtherThanSk() {
-		DynamoDbPersistentEntity<?> entity = entityFor(MatchWithOverloadedColumnTemplate.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
-
-		MatchWithOverloadedColumnTemplate match = new MatchWithOverloadedColumnTemplate();
-		match.tournamentId = "cust-1";
-		match.year = 2024;
-		match.round = "QUARTERFINAL";
-
-		assertEquals("ROUND#QUARTERFINAL#2024", resolver.compose("gsi1sk", match, new DefaultConversionService()));
-		assertEquals("gsi1sk", resolver.columnFor("gsi1sk"));
-	}
-
-	@Test
-	void aTemplateReferencingAnUnknownPropertyFailsFastAtBootstrap() {
-		@Table(tableName = "bad")
-		@SortKeyTemplate("MATCH#{doesNotExist}")
-		class BadEntity {
-			@PartitionKey
-			String pk;
+			assertAll("composed sort key", () -> assertEquals(COMPOSED_SK, sortKey),
+					() -> assertEquals(COLUMN_SK, resolver.columnFor(COLUMN_SK)));
 		}
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		assertThrows(MappingException.class, () -> mappingContext.getRequiredPersistentEntity(BadEntity.class));
 	}
 
-	@Test
-	void supportsAPrefixQueryOnALeadingSubsetOfTheTemplatesPlaceholders() {
-		DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
-		KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+	@Nested
+	@DisplayName("Decompose")
+	class Decompose {
 
-		String prefix = resolver.templateFor("sk").prefixFor(Map.of("year", 2024));
-		assertEquals("MATCH#2024#", prefix);
-		assertTrue("MATCH#2024#QUARTERFINAL".startsWith(prefix));
-		assertFalse("MATCH#20245#QUARTERFINAL".startsWith(prefix));
+		@Test
+		@DisplayName("Decomposes the physical string back onto the instance's properties")
+		void decompose_physicalString_setsProperties() {
+			DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+
+			Match reconstructed = new Match();
+			reconstructed.tournamentId = TOURNAMENT_ID;
+
+			resolver.decomposeOnto(COLUMN_SK, COMPOSED_SK, reconstructed, new DefaultConversionService());
+
+			assertAll("decomposed properties", () -> assertEquals(YEAR_2024, reconstructed.year),
+					() -> assertEquals(ROUND_QUARTERFINAL, reconstructed.round));
+		}
+	}
+
+	@Nested
+	@DisplayName("Round-trip")
+	class RoundTrip {
+
+		@Test
+		@DisplayName("Compose then decompose round-trips to the same values")
+		void composeThenDecompose_roundTrips() {
+			DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+
+			Match original = new Match(TOURNAMENT_ID, YEAR_2025, "PENDING");
+			String composed = resolver.compose(COLUMN_SK, original, new DefaultConversionService());
+
+			Match reconstructed = new Match();
+			resolver.decomposeOnto(COLUMN_SK, composed, reconstructed, new DefaultConversionService());
+
+			assertAll("round-tripped values", () -> assertEquals(original.year, reconstructed.year),
+					() -> assertEquals(original.round, reconstructed.round));
+		}
+	}
+
+	@Nested
+	@DisplayName("No template")
+	class NoTemplate {
+
+		@Test
+		@DisplayName("Entity with no @SortKeyTemplate has no template for any index")
+		void noTemplate_hasNoTemplateForAnyIndex() {
+			DynamoDbPersistentEntity<?> entity = entityFor(PlainEntity.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+
+			assertAll("no template present", () -> assertFalse(resolver.hasTemplate(COLUMN_SK)),
+					() -> assertNull(resolver.templateFor(COLUMN_SK)),
+					() -> assertNull(resolver.compose(COLUMN_SK, new PlainEntity(), new DefaultConversionService())));
+		}
+	}
+
+	@Nested
+	@DisplayName("Overloaded column")
+	class OverloadedColumn {
+
+		@Test
+		@DisplayName("Template can target an overloaded column other than sk")
+		void template_overloadedColumn_composesCorrectly() {
+			DynamoDbPersistentEntity<?> entity = entityFor(MatchWithOverloadedColumnTemplate.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+
+			MatchWithOverloadedColumnTemplate match = new MatchWithOverloadedColumnTemplate();
+			match.tournamentId = TOURNAMENT_ID;
+			match.year = YEAR_2024;
+			match.round = ROUND_QUARTERFINAL;
+
+			assertAll("overloaded column compose",
+					() -> assertEquals("ROUND#QUARTERFINAL#2024",
+							resolver.compose(COLUMN_GSI1SK, match, new DefaultConversionService())),
+					() -> assertEquals(COLUMN_GSI1SK, resolver.columnFor(COLUMN_GSI1SK)));
+		}
+	}
+
+	@Nested
+	@DisplayName("Validation")
+	class Validation {
+
+		@Test
+		@DisplayName("Template referencing an unknown property fails fast at bootstrap")
+		void unknownProperty_failsFastAtBootstrap() {
+			@Table(tableName = "bad")
+			@SortKeyTemplate("MATCH#{doesNotExist}")
+			class BadEntity {
+				@PartitionKey
+				String pk;
+			}
+
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+
+			assertThrows(MappingException.class, () -> mappingContext.getRequiredPersistentEntity(BadEntity.class));
+		}
+	}
+
+	@Nested
+	@DisplayName("Prefix query")
+	class PrefixQuery {
+
+		@Test
+		@DisplayName("Supports a prefix query on a leading subset of placeholders")
+		void prefixFor_leadingSubset_producesValidPrefix() {
+			DynamoDbPersistentEntity<?> entity = entityFor(Match.class);
+			KeyTemplateResolver resolver = KeyTemplateResolver.forEntity(entity);
+
+			String prefix = resolver.templateFor(COLUMN_SK).prefixFor(Map.of("year", YEAR_2024));
+
+			assertAll("prefix query", () -> assertEquals("MATCH#2024#", prefix),
+					() -> assertTrue("MATCH#2024#QUARTERFINAL".startsWith(prefix)),
+					() -> assertFalse("MATCH#20245#QUARTERFINAL".startsWith(prefix)));
+		}
 	}
 }

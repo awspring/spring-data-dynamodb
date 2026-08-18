@@ -18,6 +18,7 @@ package io.awspring.cloud.dynamodb.repository.config;
 import io.awspring.cloud.dynamodb.repository.support.DynamoDbRepositoryFactoryBean;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
@@ -28,6 +29,7 @@ import org.springframework.data.repository.config.DefaultRepositoryBaseClass;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
 @Documented
+@Inherited
 @Import(DynamoDbRepositoriesRegistrar.class)
 public @interface EnableDynamoDbRepositories {
 

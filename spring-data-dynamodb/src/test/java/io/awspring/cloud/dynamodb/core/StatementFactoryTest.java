@@ -26,10 +26,12 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 
-public class StatementFactoryTest {
+@DisplayName("StatementFactory -- builds AWS SDK request objects from entities")
+class StatementFactoryTest {
 
 	private DynamoDbMappingContext mappingContext;
 	private StatementFactory statementFactory;

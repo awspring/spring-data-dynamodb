@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.repository;
 import org.springframework.util.Assert;
 
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public record DynamoDbCompositeId(Object partitionKey, Object sortKey) {
 
 	public DynamoDbCompositeId {

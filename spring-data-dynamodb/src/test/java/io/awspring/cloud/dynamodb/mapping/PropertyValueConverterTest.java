@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
@@ -29,6 +30,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.convert.PropertyValueConversions;
 import org.springframework.data.convert.PropertyValueConverter;
@@ -36,7 +39,15 @@ import org.springframework.data.convert.ValueConversionContext;
 import org.springframework.data.convert.ValueConverter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class PropertyValueConverterTest {
+class PropertyValueConverterTest {
+
+	private static final String TABLE_NAME = "secretTable";
+	private static final String ID_1 = "id-1";
+	private static final String ID_2 = "id-2";
+	private static final String CODE_VALUE = "hello";
+	private static final String CODE_REVERSED = "olleh";
+	private static final String PLAIN_VALUE = "world";
+	private static final String PLAYER_ID = "testID";
 
 	private DynamoDbMappingContext mappingContext;
 	private MappingDynamoDbConverter converter;
@@ -48,53 +59,97 @@ public class PropertyValueConverterTest {
 		this.converter.afterPropertiesSet();
 	}
 
-	@Test
-	void propertyWithConverterRoundTripsViaConverter() {
-		converter.setPropertyValueConversions(PropertyValueConversions.simple(cfg -> {
-		}));
+	@Nested
+	@DisplayName("With PropertyValueConversions enabled")
+	class WithPropertyValueConversions {
 
-		SecretEntity entity = new SecretEntity("id-1", "hello", "world");
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(entity, item);
+		@BeforeEach
+		void enableConversions() {
+			converter.setPropertyValueConversions(PropertyValueConversions.simple(cfg -> {
+			}));
+		}
 
-		assertEquals("olleh", item.get("code").s(), "code must be stored through the reversing converter");
-		assertEquals("world", item.get("plain").s());
+		@Test
+		@DisplayName("write – with value converter – stores converted value")
+		void write_withValueConverter_storesConvertedValue() {
+			SecretEntity entity = new SecretEntity(ID_1, CODE_VALUE, PLAIN_VALUE);
 
-		SecretEntity read = converter.read(SecretEntity.class, item);
-		assertEquals("hello", read.getCode(), "code must be reversed back on read -> original value");
-		assertEquals("world", read.getPlain());
-		assertEquals("id-1", read.getId());
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(entity, item);
+
+			assertAll(
+					() -> assertEquals(CODE_REVERSED, item.get("code").s(),
+							"code must be stored through the reversing converter"),
+					() -> assertEquals(PLAIN_VALUE, item.get("plain").s()));
+		}
+
+		@Test
+		@DisplayName("read – with value converter – reverses back to original")
+		void read_withValueConverter_reversesBackToOriginal() {
+			SecretEntity entity = new SecretEntity(ID_1, CODE_VALUE, PLAIN_VALUE);
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(entity, item);
+
+			SecretEntity read = converter.read(SecretEntity.class, item);
+
+			assertAll(
+					() -> assertEquals(CODE_VALUE, read.getCode(),
+							"code must be reversed back on read -> original value"),
+					() -> assertEquals(PLAIN_VALUE, read.getPlain()), () -> assertEquals(ID_1, read.getId()));
+		}
 	}
 
-	@Test
-	void propertyWithoutConverterUsesExistingPath() {
-		SecretEntity entity = new SecretEntity("id-2", "hello", "world");
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(entity, item);
+	@Nested
+	@DisplayName("Without PropertyValueConversions")
+	class WithoutPropertyValueConversions {
 
-		assertEquals("hello", item.get("code").s());
-		assertNotEquals("olleh", item.get("code").s());
-		assertEquals("world", item.get("plain").s());
+		@Test
+		@DisplayName("write – without converter – stores raw value")
+		void write_withoutConverter_storesRawValue() {
+			SecretEntity entity = new SecretEntity(ID_2, CODE_VALUE, PLAIN_VALUE);
 
-		SecretEntity read = converter.read(SecretEntity.class, item);
-		assertEquals("hello", read.getCode());
-		assertEquals("world", read.getPlain());
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(entity, item);
+
+			assertAll(() -> assertEquals(CODE_VALUE, item.get("code").s()),
+					() -> assertNotEquals(CODE_REVERSED, item.get("code").s()),
+					() -> assertEquals(PLAIN_VALUE, item.get("plain").s()));
+		}
+
+		@Test
+		@DisplayName("read – without converter – returns raw value")
+		void read_withoutConverter_returnsRawValue() {
+			SecretEntity entity = new SecretEntity(ID_2, CODE_VALUE, PLAIN_VALUE);
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(entity, item);
+
+			SecretEntity read = converter.read(SecretEntity.class, item);
+
+			assertAll(() -> assertEquals(CODE_VALUE, read.getCode()), () -> assertEquals(PLAIN_VALUE, read.getPlain()));
+		}
 	}
 
-	@Test
-	void preExistingRoundTripUnchanged() {
-		LocalDate testDate = LocalDate.now();
-		PlayerCardEntity playerCard = new PlayerCardEntity("testID", testDate, Arrays.asList("test1", "test2"),
-				Collections.singletonList("099"));
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(playerCard, item);
+	@Nested
+	@DisplayName("Pre-existing entity round-trip")
+	class PreExistingEntityRoundTrip {
 
-		assertEquals("testID", item.get("id").s());
-		assertEquals(testDate.toString(), item.get("registeredOn").s());
-		assertEquals(2, item.get("tags").l().size());
+		@Test
+		@DisplayName("write – PlayerCardEntity – preserves all fields")
+		void write_playerCardEntity_preservesAllFields() {
+			LocalDate testDate = LocalDate.now();
+			PlayerCardEntity playerCard = new PlayerCardEntity(PLAYER_ID, testDate, Arrays.asList("test1", "test2"),
+					Collections.singletonList("099"));
+
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(playerCard, item);
+
+			assertAll(() -> assertEquals(PLAYER_ID, item.get("id").s()),
+					() -> assertEquals(testDate.toString(), item.get("registeredOn").s()),
+					() -> assertEquals(2, item.get("tags").l().size()));
+		}
 	}
 
-	@Table(tableName = "secretTable")
+	@Table(tableName = TABLE_NAME)
 	static class SecretEntity {
 
 		@PartitionKey

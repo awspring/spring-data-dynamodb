@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.core.mapping.events;
 
 import org.springframework.data.mapping.callback.EntityCallback;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @FunctionalInterface
 public interface DynamoDbBeforeConvertCallback<T> extends EntityCallback<T> {
 

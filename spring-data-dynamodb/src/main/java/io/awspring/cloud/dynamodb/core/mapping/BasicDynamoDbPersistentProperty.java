@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
@@ -42,6 +43,10 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentProperty<DynamoDbPersistentProperty>
 		implements DynamoDbPersistentProperty, ApplicationContextAware {
 	private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
@@ -182,8 +187,30 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 	}
 
 	@Override
-	public boolean serializeAsJson() {
+	@Nullable
+	public Pattern regexPattern() {
+		return null;
+	}
+
+	@Override
+	public boolean serializeAsNestedMap() {
 		return false;
+	}
+
+	@Override
+	public boolean isDerived() {
+		return isAnnotationPresent(Derived.class);
+	}
+
+	@Override
+	public boolean isAggregateItem() {
+		return isAnnotationPresent(AggregateItem.class);
+	}
+
+	@Override
+	@Nullable
+	public AggregateItem getAggregateItem() {
+		return findAnnotation(AggregateItem.class);
 	}
 
 	@Override

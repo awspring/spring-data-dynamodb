@@ -25,6 +25,10 @@ import org.springframework.data.mapping.model.ConvertingPropertyAccessor;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class EntityOperations {
 
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
@@ -84,13 +88,15 @@ public class EntityOperations {
 		@Nullable
 		Number getVersion();
 
+		void setVersion(@Nullable Number version);
+
 		DynamoDbPersistentEntity<?> getPersistentEntity();
 
 	}
 
 	private static class MappedEntity<T> implements Entity<T> {
 
-		private final DynamoDbPersistentEntity<?> entity;
+		protected final DynamoDbPersistentEntity<?> entity;
 		private final PersistentPropertyAccessor<T> propertyAccessor;
 
 		protected MappedEntity(DynamoDbPersistentEntity<?> entity, PersistentPropertyAccessor<T> propertyAccessor) {
@@ -131,7 +137,6 @@ public class EntityOperations {
 
 	private static class AdaptibleMappedEntity<T> extends MappedEntity<T> implements AdaptibleEntity<T> {
 
-		private final DynamoDbPersistentEntity<?> entity;
 		private final ConvertingPropertyAccessor<T> propertyAccessor;
 
 		private static <T> AdaptibleEntity<T> of(T bean,
@@ -151,7 +156,6 @@ public class EntityOperations {
 
 			super(entity, propertyAccessor);
 
-			this.entity = entity;
 			this.propertyAccessor = propertyAccessor;
 		}
 
@@ -191,12 +195,18 @@ public class EntityOperations {
 		}
 
 		@Override
-		public DynamoDbPersistentEntity<?> getPersistentEntity() {
-			return this.entity;
+		public void setVersion(@Nullable Number version) {
+
+			DynamoDbPersistentProperty versionProperty = this.entity.getRequiredVersionProperty();
+
+			// A primitive version property cannot hold null; fall back to its zero sentinel.
+			Object value = (version == null && versionProperty.getType().isPrimitive()) ? 0 : version;
+			this.propertyAccessor.setProperty(versionProperty, value);
 		}
 
-		private String getVersionColumnName() {
-			return this.entity.getRequiredVersionProperty().getColumnName();
+		@Override
+		public DynamoDbPersistentEntity<?> getPersistentEntity() {
+			return this.entity;
 		}
 	}
 }

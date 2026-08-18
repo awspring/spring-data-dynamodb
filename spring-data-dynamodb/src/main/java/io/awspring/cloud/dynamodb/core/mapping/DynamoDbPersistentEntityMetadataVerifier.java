@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.core.mapping;
 
 import org.springframework.data.mapping.MappingException;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @FunctionalInterface
 public interface DynamoDbPersistentEntityMetadataVerifier {
 

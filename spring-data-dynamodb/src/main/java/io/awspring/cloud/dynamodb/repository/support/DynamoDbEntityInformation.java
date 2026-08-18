@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.repository.support;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.repository.core.EntityInformation;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbEntityInformation<T, ID> extends EntityInformation<T, ID> {
 
 	@Nullable

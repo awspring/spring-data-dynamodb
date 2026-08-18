@@ -28,6 +28,10 @@ import org.springframework.data.repository.cdi.CdiRepositoryBean;
 import org.springframework.data.repository.config.CustomRepositoryImplementationDetector;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoryBean<T> extends CdiRepositoryBean<T> {
 
 	private final Bean<DynamoDbOperations> dynamoDbOperationsBean;

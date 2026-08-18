@@ -15,10 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import io.awspring.cloud.dynamodb.core.converter.MappingDynamoDbConverter;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
@@ -29,10 +26,19 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class SortKeyTemplateConverterTest {
+class SortKeyTemplateConverterTest {
+
+	private static final String TOURNAMENT_ID = "cust-1";
+	private static final int YEAR_2024 = 2024;
+	private static final int YEAR_2025 = 2025;
+	private static final String ROUND_QUARTERFINAL = "QUARTERFINAL";
+	private static final String COMPOSED_MATCH_SK = "MATCH#2024#QUARTERFINAL";
+	private static final String COMPOSED_OVERLOADED_SK = "ROUND#QUARTERFINAL#2024";
 
 	@Table(tableName = "orders")
 	@SortKeyTemplate("MATCH#{year}#{round}")
@@ -97,55 +103,114 @@ public class SortKeyTemplateConverterTest {
 		converter.afterPropertiesSet();
 	}
 
-	@Test
-	void writeComposesTheTemplateIntoTheConfiguredBaseTableColumn() {
-		Match match = new Match("cust-1", 2024, "QUARTERFINAL");
+	@Nested
+	@DisplayName("Write compose")
+	class WriteCompose {
 
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(match, item);
+		@Test
+		@DisplayName("Write composes the template into the configured base-table column")
+		void write_composesTemplate_intoBaseTableColumn() {
+			Match match = new Match(TOURNAMENT_ID, YEAR_2024, ROUND_QUARTERFINAL);
 
-		assertNotNull(item.get("sk"), "template must materialise the base-table 'sk' column");
-		assertEquals("MATCH#2024#QUARTERFINAL", item.get("sk").s());
-		assertEquals("2024", item.get("year").n());
-		assertEquals("QUARTERFINAL", item.get("round").s());
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(match, item);
+
+			assertAll("composed write",
+					() -> assertNotNull(item.get("sk"), "template must materialise the base-table 'sk' column"),
+					() -> assertEquals(COMPOSED_MATCH_SK, item.get("sk").s()),
+					() -> assertEquals("2024", item.get("year").n()),
+					() -> assertEquals(ROUND_QUARTERFINAL, item.get("round").s()));
+		}
 	}
 
-	@Test
-	void readReconstructsPlaceholderPropertiesFromTheComposedColumn() {
-		Map<String, AttributeValue> source = new HashMap<>();
-		source.put("pk", AttributeValue.builder().s("P").build());
-		source.put("sk", AttributeValue.builder().s("EVENT#music#concert").build());
+	@Nested
+	@DisplayName("Read decompose")
+	class ReadDecompose {
 
-		Event readBack = converter.read(Event.class, source);
+		@Test
+		@DisplayName("Read reconstructs placeholder properties from the composed column")
+		void read_reconstructsPlaceholderProperties() {
+			Map<String, AttributeValue> source = new HashMap<>();
+			source.put("pk", AttributeValue.builder().s("P").build());
+			source.put("sk", AttributeValue.builder().s("EVENT#music#concert").build());
 
-		assertEquals("P", readBack.pk);
-		assertEquals("music", readBack.category);
-		assertEquals("concert", readBack.name);
+			Event readBack = converter.read(Event.class, source);
+
+			assertAll("decomposed read", () -> assertEquals("P", readBack.pk),
+					() -> assertEquals("music", readBack.category), () -> assertEquals("concert", readBack.name));
+		}
+
+		@Test
+		@DisplayName("Reading an item whose sort key does not match the template skips decomposition")
+		void read_mismatchedSortKey_skipsDecomposition() {
+			Map<String, AttributeValue> foreignItem = new HashMap<>();
+			foreignItem.put("tournamentId", AttributeValue.fromS("t1"));
+			foreignItem.put("year", AttributeValue.fromN("2024"));
+			foreignItem.put("sk", AttributeValue.fromS("CUSTOMER#c1"));
+
+			Match result = converter.read(Match.class, foreignItem);
+
+			assertAll("graceful skip", () -> assertNotNull(result), () -> assertEquals("t1", result.tournamentId),
+					() -> assertEquals(YEAR_2024, result.year), () -> assertNull(result.round));
+		}
 	}
 
-	@Test
-	void writeThenReadRoundTripsThroughTheConverter() {
-		Match match = new Match("cust-1", 2025, "PENDING");
+	@Nested
+	@DisplayName("Round-trip")
+	class RoundTrip {
 
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(match, item);
-		Match readBack = converter.read(Match.class, item);
+		@Test
+		@DisplayName("Write then read round-trips through the converter")
+		void writeThenRead_roundTrips() {
+			Match match = new Match(TOURNAMENT_ID, YEAR_2025, "PENDING");
 
-		assertEquals(match.tournamentId, readBack.tournamentId);
-		assertEquals(match.year, readBack.year);
-		assertEquals(match.round, readBack.round);
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(match, item);
+
+			Match readBack = converter.read(Match.class, item);
+
+			assertAll("round-tripped values", () -> assertEquals(match.tournamentId, readBack.tournamentId),
+					() -> assertEquals(match.year, readBack.year), () -> assertEquals(match.round, readBack.round));
+		}
 	}
 
-	@Test
-	void declaringBothSortKeyAndSortKeyTemplateOnTheSameIndexThrowsAtWriteTime() {
-		ConflictEntity entity = new ConflictEntity();
-		entity.pk = "p";
-		entity.sk = "s";
-		entity.foo = "bar";
+	@Nested
+	@DisplayName("Conflicts")
+	class Conflicts {
 
-		Throwable ex = assertThrows(Throwable.class, () -> converter.write(entity, new HashMap<>()));
-		assertTrue(allMessages(ex).contains("@SortKeyTemplate"),
-				"exception should explain the @SortKey/@SortKeyTemplate conflict; was: " + allMessages(ex));
+		@Test
+		@DisplayName("Declaring both @SortKey and @SortKeyTemplate on the same index throws")
+		void sortKeyAndTemplate_sameIndex_throws() {
+			ConflictEntity entity = new ConflictEntity();
+			entity.pk = "p";
+			entity.sk = "s";
+			entity.foo = "bar";
+
+			Throwable ex = assertThrows(Throwable.class, () -> converter.write(entity, new HashMap<>()));
+
+			assertTrue(allMessages(ex).contains("@SortKeyTemplate"),
+					"exception should explain the @SortKey/@SortKeyTemplate conflict; was: " + allMessages(ex));
+		}
+	}
+
+	@Nested
+	@DisplayName("Overloaded column")
+	class OverloadedColumn {
+
+		@Test
+		@DisplayName("Template with explicit column materialises that overloaded column instead of sk")
+		void explicitColumn_materialisesOverloadedColumn() {
+			MatchWithOverloadedColumnTemplate match = new MatchWithOverloadedColumnTemplate(TOURNAMENT_ID, YEAR_2024,
+					ROUND_QUARTERFINAL);
+
+			Map<String, AttributeValue> item = new HashMap<>();
+			converter.write(match, item);
+
+			assertAll("overloaded column",
+					() -> assertNotNull(item.get("gsi1sk"),
+							"template must materialise its configured overloaded column"),
+					() -> assertEquals(COMPOSED_OVERLOADED_SK, item.get("gsi1sk").s()));
+		}
 	}
 
 	private static String allMessages(Throwable throwable) {
@@ -161,16 +226,5 @@ public class SortKeyTemplateConverterTest {
 			}
 		}
 		return builder.toString();
-	}
-
-	@Test
-	void templateWithAnExplicitColumnMaterialisesThatOverloadedColumnInsteadOfSk() {
-		MatchWithOverloadedColumnTemplate match = new MatchWithOverloadedColumnTemplate("cust-1", 2024, "QUARTERFINAL");
-
-		Map<String, AttributeValue> item = new HashMap<>();
-		converter.write(match, item);
-
-		assertNotNull(item.get("gsi1sk"), "template must materialise its configured overloaded column");
-		assertEquals("ROUND#QUARTERFINAL#2024", item.get("gsi1sk").s());
 	}
 }

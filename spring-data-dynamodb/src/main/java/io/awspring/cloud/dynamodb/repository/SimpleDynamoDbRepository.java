@@ -24,6 +24,10 @@ import java.util.Optional;
 import java.util.Set;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class SimpleDynamoDbRepository<T, ID> implements DynamoDbRepository<T, ID> {
 
 	private final DynamoDbOperations dynamoDbOperations;

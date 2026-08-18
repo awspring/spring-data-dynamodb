@@ -28,6 +28,10 @@ import org.springframework.data.repository.config.RepositoryConfigurationExtensi
 import org.springframework.data.repository.config.XmlRepositoryConfigurationSource;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoryConfigurationExtension extends RepositoryConfigurationExtensionSupport {
 
 	private static final String DEFAULT_OPERATIONS_BEAN_NAME = "dynamoDbTemplate";

@@ -19,13 +19,14 @@ For a deep dive into the project, refer to the Spring Data DynamoDB documentatio
 - **Spring Data Repository Support**: Familiar Spring Data repository abstractions for DynamoDB
 - **Query Methods**: Derive queries from method names, or write expressions explicitly with `@Query`
 - **Secondary Index Views**: Read-only, typed views over Global and Local Secondary Indexes
-- **Single-Table Design**: Polymorphic containers with `@InnerClass` prefix routing
+- **Single-Table Design**: Polymorphic containers with `@InnerClass` prefix or regex routing
+- **Aggregate Reads**: Fold a partition's heterogeneous rows into one typed object via `@AggregateTable` and `AggregateRepository`
 - **Sort Key Templates**: Compose and decompose sort keys from several properties
 - **Keyset Pagination**: `Window<T>` pagination backed by DynamoDB's `LastEvaluatedKey`
 - **Optimistic Locking**: `@Version`-based conditional writes
 - **PartiQL**: Execute PartiQL statements from repository methods
 - **Template API**: `DynamoDbOperations` for work that does not fit a repository method
-- **Event Callbacks**: Before/after save, convert, and delete callbacks
+- **Event Callbacks**: Before/after save, convert, and delete events; before/after save and convert callbacks
 
 ## Compatibility with Spring Project Versions
 
@@ -151,13 +152,90 @@ public class Match {
     @PartitionKey
     private String pk;
 
-    @SortKey
-    private String sk;              // composed: "MATCH#2026-02-01#m1"
+    private String sk;              // composed: "MATCH#2026-02-01#m1" (owned by the template)
 
     private LocalDate matchDate;
     private String matchId;
 }
 ```
+
+### Polymorphic Containers
+
+`@InnerClass` flattens an embedded object into the owning item, and routes each row to the one field
+whose shape it actually is. Routing is decided by matching the row's sort key against `startsWith`,
+`endsWith`, or `regex`:
+
+```java
+@Table(tableName = "single_table_demo")
+public class CustomerRow {
+
+    @PartitionKey @Column("PK") private String pk;   // "CUSTOMER#12345"
+    @SortKey      @Column("SK") private String sk;
+
+    @InnerClass(regex = "ORDER#[^#]+")               // "ORDER#9876"
+    private OrderData order;
+
+    @InnerClass(regex = "ORDER#[^#]+#LINE#[^#]+")    // "ORDER#9876#LINE#abc"
+    private OrderLineData line;
+}
+```
+
+Prefixes are the shorter form, but they cannot separate hierarchical sort keys where one kind's
+prefix is a prefix of another's: `startsWith = "ORDER#"` matches `ORDER#9876` *and*
+`ORDER#9876#LINE#abc`, so an order-line row would populate `order` as well. `regex` draws the
+boundary that prefix matching cannot.
+
+The pattern must match the **whole** sort key rather than merely appear inside it, and it is
+compiled once when the entity is first mapped, so an invalid pattern fails at bootstrap. All
+declared conditions must hold if you combine `regex` with `startsWith`/`endsWith`.
+
+Ambiguity is not checked: if two members can match the same sort key, both are populated. Keep the
+routes mutually exclusive, or drive the dispatch off an explicit discriminator attribute instead —
+`@Table(discriminator = "TYPE", typeName = "ORDER")` plus
+`DynamoDbOperations.queryPolymorphic(...)`, which returns each row already typed.
+
+
+### Aggregation Annotation
+
+`@AggregateTable` provides a simpler, read-only approach to modeling Single Table Design for query use cases. It groups related entities from the same partition into a single aggregate result, making it easier to work with heterogeneous items without manually checking each returned object.
+
+`@AggregateItem` identifies which `@Table` entity should be mapped to each field. Routing is based on the sort key and can use `startsWith`, `endsWith`, or `regex`:
+
+```java
+@AggregateTable(tableName = "single_table_demo", partitionKey = "pk", sortKey = "sk")
+public class CustomerRow {
+
+
+    @AggregateItem(regex = "ORDER#[^#]+")               // "ORDER#9876"
+    private OrderData order;
+
+
+    @AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+", sortKey ="canBeAnotherSortKeyNameForComplexQueries")    // "ORDER#9876#LINE#abc"
+    private List<OrderLineData> line;
+}
+```
+
+Unlike `@InnerClass`, `@AggregateTable` is intended specifically for read-only aggregation. It groups the matching entities into the appropriate fields of the aggregate instead of requiring callers to inspect every returned object and check which fields are null.
+
+The classes referenced by `@AggregateItem` must be annotated with `@Table`. `@AggregateItem` itself does not define or embed the entity mapping, it determines which `@Table` entity should be used when the aggregate query is materialized.
+
+`@AggregateItem` can specify `sortKey` when sortKey name is different then one in `@AggregateTable`. This can come useful when multiple sortKeys are matched in GlobalSecondaryIndex query.
+
+Read an aggregate through an `AggregateRepository<A>` — the read-only counterpart to
+`SecondaryIndexRepository`, with a fixed set of partition-oriented finders:
+
+```java
+public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+}
+
+Optional<CustomerRow> customer = repository.findByPartitionKey("CUSTOMER#123");
+```
+
+`findByPartitionKeyAndSortKey`, `findByPartitionKeyAndSortKeyStartingWith`,
+`findByPartitionKeyAndSortKeyBetween` and `existsByPartitionKey` complete the interface, and a
+`@Query` method can pass a hand-written key condition straight through. Every finder pages through
+the whole matched partition before folding. For an ad-hoc key condition without a repository, call
+`DynamoDbOperations.queryAggregate(...)` directly.
 
 ### `@Query` — explicit expressions
 
@@ -207,6 +285,10 @@ if (page.hasNext()) {
 }
 ```
 
+DynamoDB hands back one resume cursor per page, pointing *after* the last item, so a position is only
+available for the final element — use `positionAt(window.size() - 1)`. Other indices raise
+`IllegalStateException` instead of returning the page-end cursor, which would silently skip rows.
+
 ### Template API
 
 Inject `DynamoDbOperations` (implemented by `DynamoDbTemplate`) for work that does not fit a
@@ -232,11 +314,27 @@ This is a multi-module Maven project:
 
 ```bash
 # Build everything
-mvn install
+./mvnw install
 
 # Build just the library
-mvn -pl spring-data-dynamodb -am install
+./mvnw -pl spring-data-dynamodb -am install
 ```
+
+A `Makefile` wraps the common tasks and uses [Maven Daemon](https://github.com/apache/maven-mvnd)
+when it is installed, falling back to the Maven wrapper:
+
+```bash
+make build     # build and install all modules
+make test      # run the full test suite
+make format    # apply the Spotless code format
+make check     # verify formatting without modifying sources
+make docs      # build the reference guide and API docs
+make clean     # remove all build output
+make           # list the available targets
+```
+
+`make docs` writes the rendered reference guide to `docs/target/generated-docs/` and the aggregated
+Javadoc to `target/site/apidocs/`.
 
 Integration tests run against [LocalStack](https://localstack.cloud) via Testcontainers, so a running
 Docker daemon is required for the full test suite.
@@ -246,16 +344,22 @@ Code formatting is enforced by Spotless, which runs automatically during the `co
 
 ## Getting in Touch
 
-- [Discussions on Github](https://github.com/matejnedic/spring-data-dynamodb/discussions) - the best way to discuss anything Spring Data DynamoDB related
-- [Issues on Github](https://github.com/matejnedic/spring-data-dynamodb/issues) - for bug reports and feature requests
+- [Discussions on Github](https://github.com/awspring/spring-data-dynamodb/discussions) - the best way to discuss anything Spring Data DynamoDB related
+- [Issues on Github](https://github.com/awspring/spring-data-dynamodb/issues) - for bug reports and feature requests
 
 Maintainer:
 
-- Matej Nedic [Twitter](https://twitter.com/MatejNedic1)
+- Matej Nedic
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to check out and build the
+project, the conventions a pull request is expected to follow, and how to propose a new feature.
+
+## Security
+
+Please do not report security vulnerabilities through public GitHub issues. See
+[SECURITY.md](SECURITY.md) for how to report them privately.
 
 ## License
 

@@ -30,6 +30,10 @@ import java.util.Set;
 import org.springframework.data.repository.cdi.CdiRepositoryBean;
 import org.springframework.data.repository.cdi.CdiRepositoryExtensionSupport;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoryExtension extends CdiRepositoryExtensionSupport {
 
 	private final Map<Set<Annotation>, Bean<DynamoDbOperations>> dynamoDbOperationsMap = new HashMap<>();

@@ -21,6 +21,10 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.util.Assert;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbAccessor implements InitializingBean {
 
 	private @Nullable DynamoDbClient client;

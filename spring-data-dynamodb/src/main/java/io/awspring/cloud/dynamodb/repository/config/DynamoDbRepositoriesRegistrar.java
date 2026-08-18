@@ -19,6 +19,10 @@ import java.lang.annotation.Annotation;
 import org.springframework.data.repository.config.RepositoryBeanDefinitionRegistrarSupport;
 import org.springframework.data.repository.config.RepositoryConfigurationExtension;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoriesRegistrar extends RepositoryBeanDefinitionRegistrarSupport {
 
 	@Override

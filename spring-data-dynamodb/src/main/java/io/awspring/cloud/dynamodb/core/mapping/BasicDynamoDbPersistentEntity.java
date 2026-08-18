@@ -27,10 +27,15 @@ import org.springframework.context.expression.BeanFactoryResolver;
 import org.springframework.data.core.TypeInformation;
 import org.springframework.data.mapping.MappingException;
 import org.springframework.data.mapping.model.BasicPersistentEntity;
+import org.springframework.data.util.Lazy;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, DynamoDbPersistentProperty>
 		implements DynamoDbPersistentEntity<T>, ApplicationContextAware {
 
@@ -45,7 +50,7 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 
 	private @Nullable DynamoDbMappingContext mappingContext;
 
-	private final IndexKeySchemaBuilder localSchemaBuilder = new IndexKeySchemaBuilder("");
+	private final Lazy<IndexKeySchema> keySchema = Lazy.of(this::buildKeySchema);
 
 	public BasicDynamoDbPersistentEntity(TypeInformation<T> typeInformation,
 			DynamoDbPersistentEntityMetadataVerifier verifier) {
@@ -104,7 +109,7 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 
 		this.verifier.verify(this);
 
-		if (this.tableName == null && !isSecondaryIndexView()) {
+		if (this.tableName == null && !isSecondaryIndexView() && !isAggregateView()) {
 			setTableName(determineTableName());
 		}
 	}
@@ -118,9 +123,40 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 		if (this.tableName != null) {
 			return this.tableName;
 		}
-		String resolved = isSecondaryIndexView() ? resolveViewTableName() : determineTableName();
+		String resolved;
+		if (isAggregateView()) {
+			resolved = requireAggregateTable().tableName();
+		}
+		else {
+			resolved = isSecondaryIndexView() ? resolveViewTableName() : determineTableName();
+		}
 		this.tableName = resolved;
 		return resolved;
+	}
+
+	@Override
+	public boolean isAggregateView() {
+		return findAnnotation(AggregateTable.class) != null;
+	}
+
+	@Override
+	@Nullable
+	public String getAggregatePartitionKeyColumn() {
+		AggregateTable annotation = findAnnotation(AggregateTable.class);
+		return annotation != null ? annotation.partitionKey() : null;
+	}
+
+	@Override
+	@Nullable
+	public String getAggregateSortKeyColumn() {
+		AggregateTable annotation = findAnnotation(AggregateTable.class);
+		return annotation != null ? annotation.sortKey() : null;
+	}
+
+	private AggregateTable requireAggregateTable() {
+		AggregateTable annotation = findAnnotation(AggregateTable.class);
+		Assert.state(annotation != null, () -> getType().getName() + " is not an @AggregateTable class");
+		return annotation;
 	}
 
 	@Override
@@ -142,16 +178,18 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 	}
 
 	@Override
-	public void addPersistentProperty(DynamoDbPersistentProperty property) {
-		super.addPersistentProperty(property);
-		for (KeyRole role : property.getKeyRoles()) {
-			localSchemaBuilder.add(role, property);
-		}
+	public IndexKeySchema getKeySchema() {
+		return keySchema.get();
 	}
 
-	@Override
-	public IndexKeySchema getKeySchema() {
-		return localSchemaBuilder.build();
+	private IndexKeySchema buildKeySchema() {
+		IndexKeySchemaBuilder builder = new IndexKeySchemaBuilder();
+		for (DynamoDbPersistentProperty property : this) {
+			for (KeyRole role : property.getKeyRoles()) {
+				builder.add(role, property);
+			}
+		}
+		return builder.build();
 	}
 
 	@Override
@@ -182,5 +220,15 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 			return null;
 		}
 		return StringUtils.hasText(annotation.name()) ? annotation.name() : annotation.value();
+	}
+
+	@Override
+	@Nullable
+	public String getAggregateIndexName() {
+		AggregateTable annotation = findAnnotation(AggregateTable.class);
+		if (annotation == null) {
+			return null;
+		}
+		return annotation.indexName();
 	}
 }

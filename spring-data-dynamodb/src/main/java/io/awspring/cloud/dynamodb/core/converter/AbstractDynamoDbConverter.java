@@ -27,6 +27,10 @@ import org.springframework.data.mapping.PersistentProperty;
 import org.springframework.data.mapping.model.EntityInstantiators;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public abstract class AbstractDynamoDbConverter implements DynamoDbConverter, InitializingBean {
 
 	protected final ConversionService conversionService;

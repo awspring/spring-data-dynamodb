@@ -20,8 +20,6 @@ import io.awspring.cloud.dynamodb.core.EntityReadResult;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.cloud.dynamodb.core.mapping.IndexKeySchema;
-import io.awspring.cloud.dynamodb.repository.ExpressionName;
-import io.awspring.cloud.dynamodb.repository.ExpressionValue;
 import io.awspring.cloud.dynamodb.repository.Query;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import java.util.ArrayList;
@@ -29,24 +27,20 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
-import org.springframework.data.expression.ValueEvaluationContextProvider;
-import org.springframework.data.expression.ValueExpression;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.repository.query.Parameter;
 import org.springframework.data.repository.query.ParameterAccessor;
-import org.springframework.data.repository.query.Parameters;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
-import org.springframework.data.repository.query.ValueExpressionQueryRewriter;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
-
-	private static final Pattern VALUE_TOKEN = Pattern.compile(":([A-Za-z0-9_]+)");
 
 	private final Query query;
 	private final ValueExpressionDelegate valueExpressionDelegate;
@@ -91,7 +85,7 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 	protected DynamoDbQuerySpec createQuerySpec(ParameterAccessor accessor) {
 
 		if (namedQueryString != null) {
-			Bound filter = bind(namedQueryString, accessor);
+			var filter = bind(namedQueryString, accessor);
 			DynamoDbQuerySpec spec = DynamoDbQuerySpec.forScan();
 			spec.filterFragments().add(filter.expression());
 			spec.expressionAttributeNames().putAll(expressionNames());
@@ -101,11 +95,11 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		}
 
 		if (StringUtils.hasText(query.keyConditionExpression())) {
-			Bound key = bind(query.keyConditionExpression(), accessor);
+			var key = bind(query.keyConditionExpression(), accessor);
 			DynamoDbQuerySpec spec = DynamoDbQuerySpec.forRawKeyCondition(query.indexName(), key.expression(),
 					expressionNames(), key.values());
 			if (StringUtils.hasText(query.filterExpression())) {
-				Bound filter = bind(query.filterExpression(), accessor);
+				var filter = bind(query.filterExpression(), accessor);
 				spec.filterFragments().add(filter.expression());
 				spec.expressionAttributeValues().putAll(filter.values());
 			}
@@ -116,7 +110,7 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		}
 
 		if (StringUtils.hasText(query.filterExpression())) {
-			Bound filter = bind(query.filterExpression(), accessor);
+			var filter = bind(query.filterExpression(), accessor);
 			DynamoDbQuerySpec spec = DynamoDbQuerySpec.forScan();
 			spec.filterFragments().add(filter.expression());
 			spec.expressionAttributeNames().putAll(expressionNames());
@@ -138,12 +132,12 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		Assert.isTrue(query != null && StringUtils.hasText(query.updateExpression()),
 				"@Modifying @Query requires updateExpression() to be set. Method: " + getQueryMethod());
 
-		Bound update = bind(query.updateExpression(), accessor);
+		var update = bind(query.updateExpression(), accessor);
 		Map<String, Object> values = new LinkedHashMap<>(update.values());
 
 		String conditionExpression = null;
 		if (StringUtils.hasText(query.conditionExpression())) {
-			Bound condition = bind(query.conditionExpression(), accessor);
+			var condition = bind(query.conditionExpression(), accessor);
 			conditionExpression = condition.expression();
 			values.putAll(condition.values());
 		}
@@ -183,86 +177,23 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 	}
 
 	private void applyExplicitLimit(DynamoDbQuerySpec spec) {
-		if (query != null && query.limit() >= 0) {
+		if (query != null && query.limit() > 0) {
 			spec.explicitLimit(query.limit());
 		}
 	}
 
-	private record Bound(String expression, Map<String, Object> values) {
-	}
-
-	private Bound bind(String rawExpression, ParameterAccessor accessor) {
-
-		ValueExpressionQueryRewriter.EvaluatingValueExpressionQueryRewriter rewriter = ValueExpressionQueryRewriter
-				.of(valueExpressionDelegate, (index, expression) -> "__spel_" + index, (prefix, name) -> ":" + name);
-
-		ValueExpressionQueryRewriter.QueryExpressionEvaluator evaluator = rewriter.parse(rawExpression,
-				getQueryMethod().getParameters());
-
-		String expression = evaluator.getQueryString();
-		Map<String, Object> values = new LinkedHashMap<>();
-
-		Object[] rawArgs = rawArgs(accessor);
-		evaluator.evaluate(rawArgs).forEach((name, value) -> values.put(":" + name, value));
-
-		bindPlainPlaceholders(expression, accessor, values);
-		return new Bound(expression, values);
-	}
-
-	private void bindPlainPlaceholders(String expression, ParameterAccessor accessor, Map<String, Object> values) {
-
-		Parameters<?, ?> parameters = getQueryMethod().getParameters();
-		Map<String, Object> byName = new HashMap<>();
-		Map<Integer, Object> byPosition = new HashMap<>();
-
-		int bindableIndex = 0;
-		for (Parameter parameter : parameters.getBindableParameters()) {
-			Object value = accessor.getBindableValue(bindableIndex);
-			byPosition.put(bindableIndex, value);
-			parameter.getName().ifPresent(name -> byName.put(name, value));
-			bindableIndex++;
-		}
-
-		Matcher matcher = VALUE_TOKEN.matcher(expression);
-		while (matcher.find()) {
-			String token = matcher.group(1);
-			String key = ":" + token;
-			if (values.containsKey(key)) {
-				continue;
-			}
-			if (byName.containsKey(token)) {
-				values.put(key, byName.get(token));
-			}
-			else if (isAllDigits(token)) {
-				int position = Integer.parseInt(token);
-				if (byPosition.containsKey(position)) {
-					values.put(key, byPosition.get(position));
-				}
-			}
-		}
+	private QueryExpressions.Bound bind(String rawExpression, ParameterAccessor accessor) {
+		return QueryExpressions.bind(valueExpressionDelegate, getQueryMethod().getParameters(), rawExpression,
+				accessor);
 	}
 
 	private Map<String, String> expressionNames() {
-		Map<String, String> names = new LinkedHashMap<>();
-		if (query != null) {
-			for (ExpressionName name : query.names()) {
-				names.put(name.name(), name.value());
-			}
-		}
-		return names;
+		return QueryExpressions.expressionNames(query);
 	}
 
 	private void applyExpressionValues(Map<String, Object> values, ParameterAccessor accessor) {
-		if (query == null || query.values().length == 0) {
-			return;
-		}
-		ValueEvaluationContextProvider contextProvider = valueExpressionDelegate
-				.createValueContextProvider(getQueryMethod().getParameters());
-		Object[] rawArgs = rawArgs(accessor);
-		for (ExpressionValue value : query.values()) {
-			ValueExpression expression = valueExpressionDelegate.parse(value.value());
-			values.put(value.name(), expression.evaluate(contextProvider.getEvaluationContext(rawArgs)));
-		}
+		QueryExpressions.applyExpressionValues(query, valueExpressionDelegate, getQueryMethod().getParameters(),
+				accessor, values);
 	}
 
 	private record KeyValues(Object partitionKey, @Nullable Object sortKey) {
@@ -304,18 +235,5 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 				+ "parameter named '" + keyProperty.getName() + "'"
 				+ (columnName != null && !columnName.equals(keyProperty.getName()) ? " (or '" + columnName + "')" : "")
 				+ " supplying the " + role + " key value.");
-	}
-
-	private Object[] rawArgs(ParameterAccessor accessor) {
-		return ((DynamoDbParametersParameterAccessor) accessor).getValues();
-	}
-
-	private static boolean isAllDigits(String token) {
-		for (int i = 0; i < token.length(); i++) {
-			if (!Character.isDigit(token.charAt(i))) {
-				return false;
-			}
-		}
-		return !token.isEmpty();
 	}
 }

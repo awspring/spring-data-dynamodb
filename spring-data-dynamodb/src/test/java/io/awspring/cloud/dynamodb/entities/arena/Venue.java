@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.entities.arena;
 
 import java.util.Objects;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class Venue {
 	private String name;
 	private Long capacity;

@@ -16,30 +16,28 @@
 package io.awspring.cloud.dynamodb.core;
 
 import io.awspring.cloud.dynamodb.core.converter.DynamoDbConverter;
-import io.awspring.cloud.dynamodb.request.*;
 import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbScanRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbScanRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
 import io.awspring.cloud.dynamodb.request.IndexQueryBuilder;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbOperations {
 	<T> EntityWriteResult<T> save(T entity);
 
 	<T> EntityWriteResult<T> save(T entity, DynamoDbConditionRequest dynamoDBConditionRequest);
 
-	<T> EntityWriteResult<T> save(T entity, DynamoDbConditionRequestInterface builderFunction);
-
 	<T> EntityWriteResult<T> insert(T entity);
 
-	<T> Iterable<T> saveAll(Iterable<T> entities);
+	<T> Iterable<T> saveAll(Iterable<? extends T> entities);
 
 	void delete(Object entity);
 
@@ -48,15 +46,9 @@ public interface DynamoDbOperations {
 	<T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey,
 			DynamoDbConditionRequest dynamoDBConditionRequest);
 
-	<T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey,
-			DynamoDbConditionRequestInterface builderFunction);
-
 	DynamoDbConverter getConverter();
 
 	<T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequest queryRequest,
-			DynamoDbPageRequest dynamoDBPageRequest);
-
-	<T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequestInterface builderFunction,
 			DynamoDbPageRequest dynamoDBPageRequest);
 
 	<T> EntityReadResult<List<T>> executeStatement(String statement, String nextToken, Class<T> entityClass,
@@ -91,17 +83,17 @@ public interface DynamoDbOperations {
 
 	<T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest);
 
-	<T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequestInterface builderFunction);
-
 	<T> long count(Class<T> entityClass);
 
 	<T> long count(Class<T> entityClass, DynamoDbScanRequest scanRequest);
 
+	<T> long count(Class<T> entityClass, DynamoDbQueryRequest queryRequest);
+
 	<T> boolean exists(Class<T> entityClass, DynamoDbScanRequest scanRequest);
 
-	<T> List<T> findAll(Class<T> entityClass);
+	<T> boolean exists(Class<T> entityClass, DynamoDbQueryRequest queryRequest);
 
-	<T> IndexQueryBuilder<T> query(Class<T> entityClass, String indexName);
+	<T> List<T> findAll(Class<T> entityClass);
 
 	EntityQueryResult<List<Object>> queryPolymorphic(String tableName, DynamoDbQueryRequest queryRequest,
 			DynamoDbPageRequest dynamoDBPageRequest);
@@ -109,4 +101,9 @@ public interface DynamoDbOperations {
 	EntityQueryResult<List<Object>> scanPolymorphic(String tableName, DynamoDbScanRequest scanRequest);
 
 	String getTableName(Class<?> entityClass);
+
+	<A> EntityQueryResult<A> queryAggregate(Class<A> aggregateClass, DynamoDbQueryRequest dynamoDbRequest,
+			DynamoDbPageRequest dynamoDBPageRequest);
+
+	<T> IndexQueryBuilder<T> query(Class<T> entityClass, String indexName);
 }

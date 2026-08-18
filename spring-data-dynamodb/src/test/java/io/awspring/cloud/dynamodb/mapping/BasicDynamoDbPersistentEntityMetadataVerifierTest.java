@@ -15,75 +15,89 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.core.mapping.VerifierMappingExceptions;
-import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 
-public class BasicDynamoDbPersistentEntityMetadataVerifierTest {
+class BasicDynamoDbPersistentEntityMetadataVerifierTest {
 
-	@Test
-	public void shouldRejectEntityWithoutPartitionKey() {
-		DynamoDbMappingContext context = new DynamoDbMappingContext();
+	private static final String TABLE_INVALID = "invalid_table";
+	private static final String TABLE_VALID = "valid_table";
+	private static final String TABLE_VALID_WITH_SK = "valid_table_with_sk";
+	private static final String TABLE_CONFLICT = "conflict";
+	private static final String INDEX_CONFLICT = "conflict_idx";
 
-		MappingException exception = Assertions.assertThrows(MappingException.class, () -> {
-			context.getPersistentEntity(EntityWithoutPartitionKey.class);
-		});
+	@Nested
+	@DisplayName("Validation rejections")
+	class ValidationRejections {
 
-		System.out.println("Exception type: " + exception.getClass().getName());
-		System.out.println("Exception message: " + exception.getMessage());
-		if (exception.getCause() != null) {
-			System.out.println("Cause type: " + exception.getCause().getClass().getName());
-			System.out.println("Cause message: " + exception.getCause().getMessage());
+		@Test
+		@DisplayName("Throws MappingException when entity has no @PartitionKey")
+		void getPersistentEntity_noPartitionKey_throwsMappingException() {
+			DynamoDbMappingContext context = new DynamoDbMappingContext();
+
+			MappingException exception = assertThrows(MappingException.class,
+					() -> context.getPersistentEntity(EntityWithoutPartitionKey.class));
+
+			Throwable cause = exception.getCause();
+			assertAll(() -> assertNotNull(cause, "Expected a cause"),
+					() -> assertInstanceOf(VerifierMappingExceptions.class, cause,
+							"Expected VerifierMappingExceptions as cause but got "
+									+ (cause != null ? cause.getClass().getName() : "null")),
+					() -> assertTrue(
+							cause.getMessage().contains("must declare exactly one @Id / @PartitionKey property"),
+							"Expected message to contain 'must declare exactly one @Id / @PartitionKey property' but got: "
+									+ cause.getMessage()));
 		}
 
-		Throwable cause = exception.getCause();
-		Assertions.assertNotNull(cause, "Expected a cause");
-		Assertions.assertTrue(cause instanceof VerifierMappingExceptions,
-				"Expected VerifierMappingExceptions as cause but got " + cause.getClass().getName());
-		Assertions.assertTrue(cause.getMessage().contains("must declare exactly one @Id / @PartitionKey property"),
-				"Expected message to contain 'must declare exactly one @Id / @PartitionKey property' but got: "
-						+ cause.getMessage());
+		@Test
+		@DisplayName("Throws MappingException when entity has both @Table and @SecondaryIndex")
+		void getPersistentEntity_bothTableAndSecondaryIndex_throwsMappingException() {
+			DynamoDbMappingContext context = new DynamoDbMappingContext();
+
+			MappingException exception = assertThrows(MappingException.class,
+					() -> context.getPersistentEntity(EntityWithBothTableAndSecondaryIndex.class));
+
+			Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
+			assertTrue(
+					cause.getMessage()
+							.contains("declares more than one of @Table, @SecondaryIndex and @AggregateTable"),
+					"Expected error to mention @Table+@SecondaryIndex conflict, got: " + cause.getMessage());
+		}
 	}
 
-	@Test
-	public void shouldAcceptEntityWithPartitionKey() {
-		DynamoDbMappingContext context = new DynamoDbMappingContext();
+	@Nested
+	@DisplayName("Valid entities")
+	class ValidEntities {
 
-		Assertions.assertDoesNotThrow(() -> {
-			context.getPersistentEntity(ValidEntity.class);
-		});
+		@Test
+		@DisplayName("Accepts entity with @PartitionKey")
+		void getPersistentEntity_withPartitionKey_succeeds() {
+			DynamoDbMappingContext context = new DynamoDbMappingContext();
+
+			assertDoesNotThrow(() -> context.getPersistentEntity(ValidEntity.class));
+		}
+
+		@Test
+		@DisplayName("Accepts entity with @PartitionKey and @SortKey")
+		void getPersistentEntity_withPartitionKeyAndSortKey_succeeds() {
+			DynamoDbMappingContext context = new DynamoDbMappingContext();
+
+			assertDoesNotThrow(() -> context.getPersistentEntity(ValidEntityWithSortKey.class));
+		}
 	}
 
-	@Test
-	public void shouldAcceptEntityWithPartitionKeyAndSortKey() {
-		DynamoDbMappingContext context = new DynamoDbMappingContext();
-
-		Assertions.assertDoesNotThrow(() -> {
-			context.getPersistentEntity(ValidEntityWithSortKey.class);
-		});
-	}
-
-	@Test
-	public void shouldRejectEntityWithBothTableAndSecondaryIndex() {
-		DynamoDbMappingContext context = new DynamoDbMappingContext();
-
-		MappingException exception = Assertions.assertThrows(MappingException.class, () -> {
-			context.getPersistentEntity(EntityWithBothTableAndSecondaryIndex.class);
-		});
-
-		Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
-		Assertions.assertTrue(cause.getMessage().contains("declares both @Table and @SecondaryIndex"),
-				"Expected error to mention @Table+@SecondaryIndex conflict, got: " + cause.getMessage());
-	}
-
-	@Table(tableName = "conflict")
-	@SecondaryIndex(name = "conflict_idx", tableName = "conflict")
+	@Table(tableName = TABLE_CONFLICT)
+	@SecondaryIndex(name = INDEX_CONFLICT, tableName = TABLE_CONFLICT)
 	static class EntityWithBothTableAndSecondaryIndex {
 		@PartitionKey
 		private String id;
@@ -97,7 +111,7 @@ public class BasicDynamoDbPersistentEntityMetadataVerifierTest {
 		}
 	}
 
-	@Table(tableName = "invalid_table")
+	@Table(tableName = TABLE_INVALID)
 	static class EntityWithoutPartitionKey {
 		private String field;
 
@@ -110,7 +124,7 @@ public class BasicDynamoDbPersistentEntityMetadataVerifierTest {
 		}
 	}
 
-	@Table(tableName = "valid_table")
+	@Table(tableName = TABLE_VALID)
 	static class ValidEntity {
 		@PartitionKey
 		private String id;
@@ -134,7 +148,7 @@ public class BasicDynamoDbPersistentEntityMetadataVerifierTest {
 		}
 	}
 
-	@Table(tableName = "valid_table_with_sk")
+	@Table(tableName = TABLE_VALID_WITH_SK)
 	static class ValidEntityWithSortKey {
 		@PartitionKey
 		private String id;

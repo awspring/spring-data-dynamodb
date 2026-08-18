@@ -16,8 +16,10 @@
 package io.awspring.cloud.dynamodb.core.mapping;
 
 import java.lang.annotation.*;
+import org.springframework.data.annotation.Id;
 
 @Documented
+@Id
 @Retention(value = RetentionPolicy.RUNTIME)
 @Target(value = { ElementType.ANNOTATION_TYPE, ElementType.FIELD, ElementType.METHOD })
 @Repeatable(PartitionKey.List.class)

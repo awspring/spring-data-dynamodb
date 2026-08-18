@@ -23,12 +23,17 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.annotation.Version;
+import org.springframework.util.backoff.ExponentialBackOff;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
-public class DynamoDbTemplateSaveAllTest {
+@DisplayName("DynamoDbTemplate.saveAll -- batch-write semantics")
+class DynamoDbTemplateSaveAllTest {
 
 	@Table(tableName = "test_table")
 	static class TestEntity {
@@ -61,6 +66,74 @@ public class DynamoDbTemplateSaveAllTest {
 		}
 	}
 
+	/** A second item kind living in the very same physical table -- the single-table-design case. */
+	@Table(tableName = "test_table")
+	static class SiblingEntity {
+		@PartitionKey
+		private String id;
+		private String label;
+
+		public SiblingEntity() {
+		}
+
+		public SiblingEntity(String id, String label) {
+			this.id = id;
+			this.label = label;
+		}
+
+		public String getId() {
+			return id;
+		}
+
+		public String getLabel() {
+			return label;
+		}
+	}
+
+	@Table(tableName = "other_table")
+	static class OtherTableEntity {
+		@PartitionKey
+		private String id;
+
+		public OtherTableEntity() {
+		}
+
+		public OtherTableEntity(String id) {
+			this.id = id;
+		}
+
+		public String getId() {
+			return id;
+		}
+	}
+
+	@Table(tableName = "test_table")
+	static class VersionedEntity {
+		@PartitionKey
+		private String id;
+		@Version
+		private Long version;
+
+		public VersionedEntity() {
+		}
+
+		public VersionedEntity(String id) {
+			this.id = id;
+		}
+
+		public String getId() {
+			return id;
+		}
+
+		public Long getVersion() {
+			return version;
+		}
+
+		public void setVersion(Long version) {
+			this.version = version;
+		}
+	}
+
 	private DynamoDbTemplate template;
 	private MockDynamoDbClient mockClient;
 	private MappingDynamoDbConverter converter;
@@ -72,6 +145,13 @@ public class DynamoDbTemplateSaveAllTest {
 		converter.afterPropertiesSet();
 		mockClient = new MockDynamoDbClient();
 		template = new DynamoDbTemplate(mockClient, converter);
+
+		// Fast, deterministic pacing for tests: zero delay, up to 8 retries (9 total calls).
+		ExponentialBackOff fast = new ExponentialBackOff(0L, 1.0);
+		fast.setMaxInterval(0L);
+		fast.setJitter(0L);
+		fast.setMaxAttempts(8);
+		template.setBatchWriteBackOff(fast);
 	}
 
 	@Test
@@ -113,6 +193,13 @@ public class DynamoDbTemplateSaveAllTest {
 			entities.add(new TestEntity("id-" + i, "data-" + i));
 		}
 
+		// Real exponential delays (50, 100, 200), jitter disabled for a deterministic lower bound.
+		ExponentialBackOff realBackOff = new ExponentialBackOff(50L, 2.0);
+		realBackOff.setMaxInterval(5000L);
+		realBackOff.setJitter(0L);
+		realBackOff.setMaxAttempts(8);
+		template.setBatchWriteBackOff(realBackOff);
+
 		mockClient.setUnprocessedItemsSequence(Arrays.asList(3, 2, 1, 0));
 
 		long startTime = System.currentTimeMillis();
@@ -143,9 +230,9 @@ public class DynamoDbTemplateSaveAllTest {
 
 		assertTrue(exception.getMessage().contains("Failed to write 1 item(s)"),
 				"Exception message should indicate the number of unprocessed items");
-		assertTrue(exception.getMessage().contains("after 8 attempts"),
-				"Exception message should indicate the number of attempts");
-		assertEquals(8, mockClient.getCallCount(), "Should exhaust all 8 retry attempts");
+		assertTrue(exception.getMessage().contains("after 9 attempt(s)"),
+				"Exception message should indicate the actual number of attempts (1 original + 8 retries)");
+		assertEquals(9, mockClient.getCallCount(), "Should make 1 original call plus 8 retries");
 	}
 
 	@Test
@@ -227,10 +314,52 @@ public class DynamoDbTemplateSaveAllTest {
 				"Second call should only retry 2 unprocessed items");
 	}
 
+	@Test
+	void saveAllBatchesMixedItemKindsSharingOneTableIntoASingleRequest() {
+		List<Object> entities = List.of(new TestEntity("id-0", "data-0"), new SiblingEntity("id-1", "label-1"),
+				new TestEntity("id-2", "data-2"));
+
+		mockClient.setUnprocessedItemsSequence(Collections.emptyList());
+
+		Iterable<Object> result = template.saveAll(entities);
+
+		assertIterableEquals(entities, result);
+		assertEquals(1, mockClient.getCallCount(), "Mixed item kinds on one table belong in one BatchWriteItem");
+		assertEquals(3, mockClient.getLastRequestItemCount());
+		assertEquals(List.of(List.of("test_table")), mockClient.getAllRequestTableNames());
+	}
+
+	@Test
+	void saveAllGroupsEntitiesByTableIntoOneRequestPerTable() {
+		List<Object> entities = List.of(new TestEntity("id-0", "data-0"), new OtherTableEntity("id-1"),
+				new SiblingEntity("id-2", "label-2"));
+
+		mockClient.setUnprocessedItemsSequence(Collections.emptyList());
+
+		template.saveAll(entities);
+
+		assertEquals(2, mockClient.getCallCount(), "Each table gets its own BatchWriteItem request");
+		assertEquals(List.of(List.of("test_table"), List.of("other_table")), mockClient.getAllRequestTableNames(),
+				"Groups are batched in first-seen order");
+		assertEquals(Arrays.asList(2, 1), mockClient.getAllRequestItemCounts());
+	}
+
+	@Test
+	void saveAllRejectsAVersionedEntityAnywhereInTheBatchWithoutWritingAnything() {
+		List<Object> entities = List.of(new TestEntity("id-0", "data-0"), new VersionedEntity("id-1"));
+
+		InvalidDataAccessApiUsageException exception = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> template.saveAll(entities));
+
+		assertTrue(exception.getMessage().contains(VersionedEntity.class.getName()), exception.getMessage());
+		assertEquals(0, mockClient.getCallCount(), "Must fail before issuing any write");
+	}
+
 	static class MockDynamoDbClient implements DynamoDbClient {
 		private int callCount = 0;
 		private List<Integer> unprocessedItemsSequence = new ArrayList<>();
 		private List<Integer> requestItemCounts = new ArrayList<>();
+		private List<List<String>> requestTableNames = new ArrayList<>();
 
 		public void setUnprocessedItemsSequence(List<Integer> sequence) {
 			this.unprocessedItemsSequence = new ArrayList<>(sequence);
@@ -248,6 +377,10 @@ public class DynamoDbTemplateSaveAllTest {
 			return new ArrayList<>(requestItemCounts);
 		}
 
+		public List<List<String>> getAllRequestTableNames() {
+			return new ArrayList<>(requestTableNames);
+		}
+
 		@Override
 		public BatchWriteItemResponse batchWriteItem(BatchWriteItemRequest request) {
 			callCount++;
@@ -256,6 +389,7 @@ public class DynamoDbTemplateSaveAllTest {
 				itemCount += requests.size();
 			}
 			requestItemCounts.add(itemCount);
+			requestTableNames.add(new ArrayList<>(request.requestItems().keySet()));
 
 			int unprocessedCount = 0;
 			if (callCount - 1 < unprocessedItemsSequence.size()) {

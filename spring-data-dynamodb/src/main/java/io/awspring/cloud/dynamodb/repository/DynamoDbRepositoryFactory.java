@@ -20,14 +20,17 @@ import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.cloud.dynamodb.repository.query.DynamoDbQueryMethod;
 import io.awspring.cloud.dynamodb.repository.query.PartTreeDynamoDbQuery;
+import io.awspring.cloud.dynamodb.repository.query.StringBasedAggregateQuery;
 import io.awspring.cloud.dynamodb.repository.query.StringBasedDynamoDbQuery;
 import io.awspring.cloud.dynamodb.repository.support.DynamoDbEntityInformation;
 import io.awspring.cloud.dynamodb.repository.support.MappingDynamoDbEntityInformation;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.projection.ProjectionFactory;
+import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.NamedQueries;
 import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.data.repository.core.RepositoryMetadata;
@@ -39,6 +42,10 @@ import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
@@ -53,12 +60,11 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	}
 
 	@Override
-	public <T, ID> DynamoDbEntityInformation<T, ID> getEntityInformation(Class<T> domainClass) {
-		return getEntityInformation(domainClass, false);
+	public EntityInformation<?, ?> getEntityInformation(RepositoryMetadata metadata) {
+		return getEntityInformation(metadata.getDomainType(), false);
 	}
 
-	private <T, ID> DynamoDbEntityInformation<T, ID> getEntityInformation(Class<T> domainClass,
-			boolean secondaryIndexView) {
+	<T, ID> DynamoDbEntityInformation<T, ID> getEntityInformation(Class<T> domainClass, boolean secondaryIndexView) {
 		DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(domainClass);
 		return new MappingDynamoDbEntityInformation<>((DynamoDbPersistentEntity<T>) entity, operations.getConverter(),
 				secondaryIndexView);
@@ -67,7 +73,7 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	@Override
 	protected Object getTargetRepository(RepositoryInformation information) {
 		DynamoDbEntityInformation<?, Object> entityInformation = getEntityInformation(information.getDomainType(),
-				isSecondaryIndexView(information));
+				isSecondaryIndexView(information) || isAggregateRepository(information));
 		return getTargetRepositoryViaReflection(information, entityInformation, operations);
 	}
 
@@ -75,8 +81,15 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 		return SecondaryIndexRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
 	}
 
+	private static boolean isAggregateRepository(RepositoryMetadata metadata) {
+		return AggregateRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
+	}
+
 	@Override
 	protected Class<?> getRepositoryBaseClass(RepositoryMetadata metadata) {
+		if (isAggregateRepository(metadata)) {
+			return SimpleAggregateRepository.class;
+		}
 		return SimpleDynamoDbRepository.class;
 	}
 
@@ -97,6 +110,18 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 			NamedQueries namedQueries) {
 
 		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, factory, mappingContext);
+
+		if (isAggregateRepository(metadata)) {
+			if (queryMethod.hasAnnotatedQuery()) {
+				return new StringBasedAggregateQuery(queryMethod, operations, valueExpressionDelegate);
+			}
+			throw new InvalidDataAccessApiUsageException(
+					"AggregateRepository does not support PartTree (derived) query methods; an aggregate class "
+							+ "exposes no key properties to bind to. Use @Query(keyConditionExpression=...) or one "
+							+ "of the fixed base methods (findByPartitionKey, findByPartitionKeyAndSortKey, etc.). "
+							+ "Method: " + method);
+		}
+
 		String namedQueryName = queryMethod.getNamedQueryName();
 
 		if (namedQueries.hasQuery(namedQueryName)) {

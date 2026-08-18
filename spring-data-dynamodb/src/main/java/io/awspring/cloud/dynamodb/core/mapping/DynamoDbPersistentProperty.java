@@ -18,10 +18,15 @@ package io.awspring.cloud.dynamodb.core.mapping;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.data.mapping.PersistentProperty;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbPersistentProperty
 		extends PersistentProperty<DynamoDbPersistentProperty>, ApplicationContextAware {
 
@@ -46,5 +51,15 @@ public interface DynamoDbPersistentProperty
 	@Nullable
 	String endsWith();
 
-	boolean serializeAsJson();
+	@Nullable
+	Pattern regexPattern();
+
+	boolean serializeAsNestedMap();
+
+	boolean isDerived();
+
+	boolean isAggregateItem();
+
+	@Nullable
+	AggregateItem getAggregateItem();
 }

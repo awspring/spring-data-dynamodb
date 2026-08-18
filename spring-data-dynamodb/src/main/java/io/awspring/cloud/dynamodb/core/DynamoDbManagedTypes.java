@@ -20,6 +20,13 @@ import java.util.function.Consumer;
 import org.springframework.data.domain.ManagedTypes;
 import org.springframework.util.Assert;
 
+/**
+ * To be implemented for AOT support. Currently useless.
+ */
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class DynamoDbManagedTypes implements ManagedTypes {
 
 	private final ManagedTypes delegate;

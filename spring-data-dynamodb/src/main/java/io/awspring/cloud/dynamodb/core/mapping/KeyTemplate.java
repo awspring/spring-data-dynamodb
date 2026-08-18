@@ -23,6 +23,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class KeyTemplate {
 
 	private static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z0-9_]+)}");

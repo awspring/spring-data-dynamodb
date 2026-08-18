@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -32,6 +33,8 @@ import io.awspring.cloud.dynamodb.repository.Modifying;
 import io.awspring.cloud.dynamodb.repository.Query;
 import java.lang.reflect.Method;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.projection.ProjectionFactory;
@@ -42,9 +45,18 @@ import org.springframework.data.repository.core.support.DefaultRepositoryMetadat
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-public class StringBasedDynamoDbQueryCombinedExpressionTest {
+@DisplayName("StringBasedDynamoDbQuery combined expressions")
+class StringBasedDynamoDbQueryCombinedExpressionTest {
 
-	@Table(tableName = "tournament_arena")
+	private static final String TABLE_NAME = "tournament_arena";
+	private static final String INDEX_GSI1 = "GSI1";
+	private static final String PK_TOURNAMENT = "TOURNAMENT#winter2026";
+	private static final String SK_FROM = "MATCH#2026-02-01";
+	private static final String SK_TO = "MATCH#2026-02-28";
+	private static final String REGION_EU = "EU";
+	private static final String ROUND_FINAL = "FINAL";
+
+	@Table(tableName = TABLE_NAME)
 	static class Match {
 		@PartitionKey
 		String pk;
@@ -57,26 +69,25 @@ public class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 	interface MatchRepository extends Repository<Match, String> {
 
-		@Query(keyConditionExpression = "#pk = :pk AND #sk BETWEEN :from AND :to", filterExpression = "#region = :region", indexName = "GSI1", limit = 25, names = {
+		@Query(keyConditionExpression = "#pk = :pk AND #sk BETWEEN :from AND :to", filterExpression = "#region = :region", indexName = INDEX_GSI1, limit = 25, names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#sk", value = "sk"),
 				@ExpressionName(name = "#region", value = "region") })
 		List<Match> findInRangeInRegion(@Param("pk") String pk, @Param("from") String from, @Param("to") String to,
 				@Param("region") String region);
 
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = "GSI1", limit = 10, conditionExpression = "attribute_exists(#pk)", names = {
+		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = INDEX_GSI1, limit = 10, conditionExpression = "attribute_exists(#pk)", names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#region", value = "region") })
 		List<Match> findWithStrayConditionExpression(@Param("pk") String pk, @Param("region") String region);
 
-
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#round = :round", indexName = "GSI1", limit = 5, consistentRead = true, names = {
+		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#round = :round", indexName = INDEX_GSI1, limit = 5, consistentRead = true, names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#round", value = "round") })
 		List<Match> findConsistentlyLimited(@Param("pk") String pk, @Param("round") String round);
 
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = "GSI1", names = {
+		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = INDEX_GSI1, names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#region", value = "region") })
 		List<Match> findUnlimited(@Param("pk") String pk, @Param("region") String region);
 
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = "GSI1", limit = 7, names = {
+		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = INDEX_GSI1, limit = 7, names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#region", value = "region") })
 		List<Match> findWithCompetingLimits(@Param("pk") String pk, @Param("region") String region, Limit limit);
 
@@ -84,7 +95,7 @@ public class StringBasedDynamoDbQueryCombinedExpressionTest {
 		@Query(filterExpression = "#region = :region", limit = 3, names = @ExpressionName(name = "#region", value = "region"))
 		List<Match> scanByRegionLimited(@Param("region") String region);
 
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#undeclared = :region", indexName = "GSI1", limit = 4, names = @ExpressionName(name = "#pk", value = "pk"))
+		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#undeclared = :region", indexName = INDEX_GSI1, limit = 4, names = @ExpressionName(name = "#pk", value = "pk"))
 		List<Match> findWithUndeclaredFilterAlias(@Param("pk") String pk, @Param("region") String region);
 
 		@AllowScan
@@ -136,228 +147,286 @@ public class StringBasedDynamoDbQueryCombinedExpressionTest {
 		return new StringBasedDynamoDbQuery(queryMethod, operations, ValueExpressionDelegate.create());
 	}
 
+	@Nested
+	@DisplayName("Key condition + filter + limit combined")
+	class CombinedQueryTests {
 
-	@Test
-	void keyConditionAndFilterAndLimitAllLandOnTheSameQueryRequest() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
-				String.class, String.class);
+		@Test
+		@DisplayName("key condition, filter, and limit all land on the same query request")
+		void keyConditionAndFilterAndLimitAllLandOnTheSameQueryRequest() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
+					String.class, String.class);
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "MATCH#2026-02-01", "MATCH#2026-02-28", "EU" });
+			// Act
+			query.execute(new Object[] { PK_TOURNAMENT, SK_FROM, SK_TO, REGION_EU });
 
-		assertNotNull(operations.lastCapturedRequest, "a keyConditionExpression must produce a Query, not a Scan");
-		assertNull(operations.lastCapturedScanRequest, "a keyConditionExpression must never fall back to a Scan");
+			// Assert
+			assertAll(
+					() -> assertNotNull(operations.lastCapturedRequest,
+							"a keyConditionExpression must produce a Query, not a Scan"),
+					() -> assertNull(operations.lastCapturedScanRequest,
+							"a keyConditionExpression must never fall back to a Scan"),
+					() -> assertEquals(INDEX_GSI1, operations.lastCapturedRequest.getIndexName()),
+					() -> assertEquals("#pk = :pk AND #sk BETWEEN :from AND :to",
+							operations.lastCapturedRequest.getKeyConditionExpression()),
+					() -> assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression(),
+							"the filterExpression must survive alongside the key condition"),
+					() -> assertEquals(25, operations.lastCapturedPageRequest.getLimit(),
+							"@Query(limit=...) must reach the page request"));
+		}
 
-		assertEquals("GSI1", operations.lastCapturedRequest.getIndexName());
-		assertEquals("#pk = :pk AND #sk BETWEEN :from AND :to",
-				operations.lastCapturedRequest.getKeyConditionExpression());
-		assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression(),
-				"the filterExpression must survive alongside the key condition");
-		assertEquals(25, operations.lastCapturedPageRequest.getLimit(),
-				"@Query(limit=...) must reach the page request");
+		@Test
+		@DisplayName("values from key condition and filter are merged into one value map")
+		void valuesFromTheKeyConditionAndTheFilterAreMergedIntoOneValueMap() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
+					String.class, String.class);
+
+			// Act
+			query.execute(new Object[] { PK_TOURNAMENT, SK_FROM, SK_TO, REGION_EU });
+
+			// Assert
+			var values = operations.lastCapturedRequest.getExpressionAttributeValues();
+			assertAll(() -> assertEquals(4, values.size(), "three key-condition values plus one filter value"),
+					() -> assertEquals(PK_TOURNAMENT, values.get(":pk")),
+					() -> assertEquals(SK_FROM, values.get(":from")), () -> assertEquals(SK_TO, values.get(":to")),
+					() -> assertEquals(REGION_EU, values.get(":region"),
+							"the filter's value must be merged in, not dropped"));
+		}
+
+		@Test
+		@DisplayName("names from key condition and filter are merged into one name map")
+		void namesFromTheKeyConditionAndTheFilterAreMergedIntoOneNameMap() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
+					String.class, String.class);
+
+			// Act
+			query.execute(new Object[] { PK_TOURNAMENT, SK_FROM, SK_TO, REGION_EU });
+
+			// Assert
+			var names = operations.lastCapturedRequest.getExpressionAttributeNames();
+			assertAll(() -> assertEquals("pk", names.get("#pk")), () -> assertEquals("sk", names.get("#sk")),
+					() -> assertEquals("region", names.get("#region"), "the filter's alias must be present too"));
+		}
 	}
 
-	@Test
-	void valuesFromTheKeyConditionAndTheFilterAreMergedIntoOneValueMap() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
-				String.class, String.class);
+	@Nested
+	@DisplayName("Limit handling")
+	class LimitTests {
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "MATCH#2026-02-01", "MATCH#2026-02-28", "EU" });
+		@Test
+		@DisplayName("consistentRead applies when combined with a filter and a limit")
+		void consistentReadAppliesWhenCombinedWithAFilterAndALimit() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findConsistentlyLimited", String.class,
+					String.class);
 
-		var values = operations.lastCapturedRequest.getExpressionAttributeValues();
-		assertEquals(4, values.size(), "three key-condition values plus one filter value");
-		assertEquals("TOURNAMENT#winter2026", values.get(":pk"));
-		assertEquals("MATCH#2026-02-01", values.get(":from"));
-		assertEquals("MATCH#2026-02-28", values.get(":to"));
-		assertEquals("EU", values.get(":region"), "the filter's value must be merged in, not dropped");
+			query.execute(new Object[] { PK_TOURNAMENT, ROUND_FINAL });
+
+			assertAll(() -> assertEquals(Boolean.TRUE, operations.lastCapturedRequest.getConsistentRead()),
+					() -> assertEquals("#round = :round", operations.lastCapturedRequest.getFilterExpression()),
+					() -> assertEquals(5, operations.lastCapturedPageRequest.getLimit()));
+		}
+
+		@Test
+		@DisplayName("omitting limit leaves the request unlimited")
+		void omittingLimitLeavesTheRequestUnlimited() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findUnlimited", String.class, String.class);
+
+			query.execute(new Object[] { PK_TOURNAMENT, REGION_EU });
+
+			assertAll(() -> assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression()),
+					() -> assertNull(operations.lastCapturedPageRequest.getLimit(),
+							"limit() defaults to -1, which must not become an explicit limit"));
+		}
+
+		@Test
+		@DisplayName("an annotation limit wins over a Limit argument")
+		void anAnnotationLimitWinsOverALimitArgument() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findWithCompetingLimits", String.class, String.class,
+					Limit.class);
+
+			query.execute(new Object[] { PK_TOURNAMENT, REGION_EU, Limit.of(99) });
+
+			assertEquals(7, operations.lastCapturedPageRequest.getLimit(),
+					"an explicit @Query(limit=...) takes precedence over a Limit parameter");
+		}
 	}
 
-	@Test
-	void namesFromTheKeyConditionAndTheFilterAreMergedIntoOneNameMap() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findInRangeInRegion", String.class, String.class,
-				String.class, String.class);
+	@Nested
+	@DisplayName("Scan path")
+	class ScanPathTests {
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "MATCH#2026-02-01", "MATCH#2026-02-28", "EU" });
+		@Test
+		@DisplayName("filter and limit without a key condition take the scan path")
+		void filterAndLimitWithoutAKeyConditionTakeTheScanPath() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "scanByRegionLimited", String.class);
 
-		var names = operations.lastCapturedRequest.getExpressionAttributeNames();
-		assertEquals("pk", names.get("#pk"));
-		assertEquals("sk", names.get("#sk"));
-		assertEquals("region", names.get("#region"), "the filter's alias must be present too");
+			query.execute(new Object[] { REGION_EU });
+
+			assertAll(() -> assertNotNull(operations.lastCapturedScanRequest, "no keyConditionExpression means a Scan"),
+					() -> assertNull(operations.lastCapturedRequest),
+					() -> assertEquals("#region = :region", operations.lastCapturedScanRequest.getFilterExpression()),
+					() -> assertEquals(3, operations.lastCapturedScanRequest.getLimit(),
+							"the limit must reach the scan request"));
+		}
 	}
 
-	@Test
-	void consistentReadAppliesWhenCombinedWithAFilterAndALimit() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findConsistentlyLimited", String.class, String.class);
+	@Nested
+	@DisplayName("conditionExpression handling on read queries")
+	class ConditionExpressionOnReadTests {
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "FINAL" });
+		@Test
+		@DisplayName("conditionExpression is ignored on a read query")
+		void conditionExpressionIsIgnoredOnAReadQuery() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findWithStrayConditionExpression", String.class,
+					String.class);
 
-		assertEquals(Boolean.TRUE, operations.lastCapturedRequest.getConsistentRead());
-		assertEquals("#round = :round", operations.lastCapturedRequest.getFilterExpression());
-		assertEquals(5, operations.lastCapturedPageRequest.getLimit());
+			query.execute(new Object[] { PK_TOURNAMENT, REGION_EU });
+
+			assertAll(() -> assertEquals("#pk = :pk", operations.lastCapturedRequest.getKeyConditionExpression()),
+					() -> assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression()),
+					() -> assertEquals(10, operations.lastCapturedPageRequest.getLimit()),
+					() -> assertFalse(operations.lastCapturedRequest.getFilterExpression().contains("attribute_exists"),
+							"conditionExpression must not be folded into the filterExpression"),
+					() -> assertFalse(
+							operations.lastCapturedRequest.getKeyConditionExpression().contains("attribute_exists"),
+							"conditionExpression must not be folded into the keyConditionExpression"));
+		}
 	}
 
-	@Test
-	void omittingLimitLeavesTheRequestUnlimited() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findUnlimited", String.class, String.class);
+	@Nested
+	@DisplayName("Undeclared alias auto-resolution")
+	class UndeclaredAliasTests {
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "EU" });
+		@Test
+		@DisplayName("auto-resolved on the query path")
+		void anUndeclaredFilterAliasIsAutoResolvedOnTheQueryPathToo() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "findWithUndeclaredFilterAlias", String.class,
+					String.class);
 
-		assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression());
-		assertNull(operations.lastCapturedPageRequest.getLimit(),
-				"limit() defaults to -1, which must not become an explicit limit");
+			query.execute(new Object[] { PK_TOURNAMENT, REGION_EU });
+
+			var names = operations.lastCapturedRequest.getExpressionAttributeNames();
+			assertAll(() -> assertEquals("pk", names.get("#pk"), "a declared alias still wins"),
+					() -> assertEquals("undeclared", names.get("#undeclared"),
+							"an undeclared alias is derived from the placeholder itself"));
+		}
+
+		@Test
+		@DisplayName("auto-resolved on the scan path")
+		void anUndeclaredFilterAliasIsAutoResolvedOnTheScanPath() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "scanWithUndeclaredFilterAlias", String.class);
+
+			query.execute(new Object[] { REGION_EU });
+
+			assertEquals("undeclared",
+					operations.lastCapturedScanRequest.getExpressionAttributeNames().get("#undeclared"),
+					"the scan path derives an undeclared alias from the placeholder itself");
+		}
 	}
 
-	@Test
-	void anAnnotationLimitWinsOverALimitArgument() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findWithCompetingLimits", String.class, String.class,
-				Limit.class);
+	@Nested
+	@DisplayName("@Modifying update expression handling")
+	class ModifyingUpdateTests {
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "EU", Limit.of(99) });
+		@Test
+		@DisplayName("updateExpression and conditionExpression both land on the update request")
+		void updateExpressionAndConditionExpressionBothLandOnTheUpdateRequest() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "recordWinner", String.class, String.class,
+					String.class, String.class);
 
-		assertEquals(7, operations.lastCapturedPageRequest.getLimit(),
-				"an explicit @Query(limit=...) takes precedence over a Limit parameter");
-	}
+			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
+					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7", ROUND_FINAL);
+			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
 
-	@Test
-	void filterAndLimitWithoutAKeyConditionTakeTheScanPath() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "scanByRegionLimited", String.class);
+			assertAll(
+					() -> assertEquals(PK_TOURNAMENT, update.partitionKey(),
+							"the partition key comes from @Param(\"pk\")"),
+					() -> assertEquals("MATCH#m1", update.sortKey(), "the sort key comes from @Param(\"sk\")"),
+					() -> assertEquals("SET #winner = :winner", update.request().getUpdateExpression()),
+					() -> assertEquals("attribute_exists(#pk) AND #round = :round",
+							update.request().getConditionExpression()));
+		}
 
-		query.execute(new Object[] { "EU" });
+		@Test
+		@DisplayName("values from the update and the condition are merged")
+		void valuesFromTheUpdateAndTheConditionAreMergedOnTheUpdateRequest() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "recordWinner", String.class, String.class,
+					String.class, String.class);
 
-		assertNotNull(operations.lastCapturedScanRequest, "no keyConditionExpression means a Scan");
-		assertNull(operations.lastCapturedRequest);
-		assertEquals("#region = :region", operations.lastCapturedScanRequest.getFilterExpression());
-		assertEquals(3, operations.lastCapturedScanRequest.getLimit(), "the limit must reach the scan request");
-	}
+			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
+					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7", ROUND_FINAL);
+			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
 
+			var values = update.request().getExpressionAttributeValues();
+			var names = update.request().getExpressionAttributeNames();
+			assertAll(() -> assertEquals("player-7", values.get(":winner"), "the update's value"),
+					() -> assertEquals(ROUND_FINAL, values.get(":round"),
+							"the condition's value must be merged in as well"),
+					() -> assertEquals("winner", names.get("#winner")), () -> assertEquals("pk", names.get("#pk")),
+					() -> assertEquals("round", names.get("#round")));
+		}
 
-	@Test
-	void conditionExpressionIsIgnoredOnAReadQuery() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findWithStrayConditionExpression", String.class,
-				String.class);
+		@Test
+		@DisplayName("an @ExpressionValue constant is available to the conditionExpression")
+		void anExpressionValueConstantIsAvailableToTheConditionExpression() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerInFinal", String.class, String.class,
+					String.class);
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "EU" });
+			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
+					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
+			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
 
-		assertEquals("#pk = :pk", operations.lastCapturedRequest.getKeyConditionExpression());
-		assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression());
-		assertEquals(10, operations.lastCapturedPageRequest.getLimit());
+			assertAll(() -> assertEquals("#round = :expectedRound", update.request().getConditionExpression()),
+					() -> assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
+							"a plain @ExpressionValue is taken as a literal"),
+					() -> assertEquals("player-7", update.request().getExpressionAttributeValues().get(":winner")));
+		}
 
-		assertFalse(operations.lastCapturedRequest.getFilterExpression().contains("attribute_exists"),
-				"conditionExpression must not be folded into the filterExpression");
-		assertFalse(operations.lastCapturedRequest.getKeyConditionExpression().contains("attribute_exists"),
-				"conditionExpression must not be folded into the keyConditionExpression");
-	}
+		@Test
+		@DisplayName("an @ExpressionValue written as SpEL is evaluated")
+		void anExpressionValueWrittenAsSpelIsEvaluatedForTheConditionExpression() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerInFinalViaSpel", String.class,
+					String.class, String.class);
 
-	@Test
-	void anUndeclaredFilterAliasIsLeftUnresolvedOnTheQueryPath() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "findWithUndeclaredFilterAlias", String.class,
-				String.class);
+			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
+					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
+			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
 
-		query.execute(new Object[] { "TOURNAMENT#winter2026", "EU" });
+			assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
+					"a #{...} @ExpressionValue is evaluated as SpEL rather than passed through");
+		}
 
-		var names = operations.lastCapturedRequest.getExpressionAttributeNames();
-		assertEquals("pk", names.get("#pk"));
-		assertNull(names.get("#undeclared"),
-				"the raw key-condition path does not auto-derive aliases: declare them in names()");
-	}
+		@Test
+		@DisplayName("omitting conditionExpression leaves it null rather than empty")
+		void omittingConditionExpressionLeavesItNullRatherThanEmpty() throws NoSuchMethodException {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerUnconditionally", String.class,
+					String.class, String.class);
 
-	@Test
-	void anUndeclaredFilterAliasIsAutoResolvedOnTheScanPath() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "scanWithUndeclaredFilterAlias", String.class);
+			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
+					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
+			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
 
-		query.execute(new Object[] { "EU" });
-
-		assertEquals("undeclared", operations.lastCapturedScanRequest.getExpressionAttributeNames().get("#undeclared"),
-				"the scan path derives an undeclared alias from the placeholder itself");
-	}
-
-	@Test
-	void updateExpressionAndConditionExpressionBothLandOnTheUpdateRequest() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "recordWinner", String.class, String.class, String.class,
-				String.class);
-
-		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(query.getQueryMethod(),
-				"TOURNAMENT#winter2026", "MATCH#m1", "player-7", "FINAL");
-		AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
-
-		assertEquals("TOURNAMENT#winter2026", update.partitionKey(), "the partition key comes from @Param(\"pk\")");
-		assertEquals("MATCH#m1", update.sortKey(), "the sort key comes from @Param(\"sk\")");
-		assertEquals("SET #winner = :winner", update.request().getUpdateExpression());
-		assertEquals("attribute_exists(#pk) AND #round = :round", update.request().getConditionExpression());
-	}
-
-	@Test
-	void valuesFromTheUpdateAndTheConditionAreMergedOnTheUpdateRequest() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "recordWinner", String.class, String.class, String.class,
-				String.class);
-
-		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(query.getQueryMethod(),
-				"TOURNAMENT#winter2026", "MATCH#m1", "player-7", "FINAL");
-		AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
-
-		var values = update.request().getExpressionAttributeValues();
-		assertEquals("player-7", values.get(":winner"), "the update's value");
-		assertEquals("FINAL", values.get(":round"), "the condition's value must be merged in as well");
-
-		var names = update.request().getExpressionAttributeNames();
-		assertEquals("winner", names.get("#winner"));
-		assertEquals("pk", names.get("#pk"));
-		assertEquals("round", names.get("#round"));
-	}
-
-	@Test
-	void anExpressionValueConstantIsAvailableToTheConditionExpression() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerInFinal", String.class, String.class,
-				String.class);
-
-		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(query.getQueryMethod(),
-				"TOURNAMENT#winter2026", "MATCH#m1", "player-7");
-		AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
-
-		assertEquals("#round = :expectedRound", update.request().getConditionExpression());
-		assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
-				"a plain @ExpressionValue is taken as a literal, so no quoting is needed");
-		assertEquals("player-7", update.request().getExpressionAttributeValues().get(":winner"));
-	}
-
-	@Test
-	void anExpressionValueWrittenAsSpelIsEvaluatedForTheConditionExpression() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerInFinalViaSpel", String.class, String.class,
-				String.class);
-
-		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(query.getQueryMethod(),
-				"TOURNAMENT#winter2026", "MATCH#m1", "player-7");
-		AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
-
-		assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
-				"a #{...} @ExpressionValue is evaluated as SpEL rather than passed through");
-	}
-
-	@Test
-	void omittingConditionExpressionLeavesItNullRatherThanEmpty() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "recordWinnerUnconditionally", String.class, String.class,
-				String.class);
-
-		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(query.getQueryMethod(),
-				"TOURNAMENT#winter2026", "MATCH#m1", "player-7");
-		AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
-
-		assertEquals("SET #winner = :winner", update.request().getUpdateExpression());
-		assertNull(update.request().getConditionExpression(),
-				"an unset conditionExpression must stay null so no ConditionExpression is sent");
+			assertAll(() -> assertEquals("SET #winner = :winner", update.request().getUpdateExpression()),
+					() -> assertNull(update.request().getConditionExpression(),
+							"an unset conditionExpression must stay null so no ConditionExpression is sent"));
+		}
 	}
 }

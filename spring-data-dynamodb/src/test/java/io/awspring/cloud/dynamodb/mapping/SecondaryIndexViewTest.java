@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -30,12 +31,26 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 
-public class SecondaryIndexViewTest {
+class SecondaryIndexViewTest {
 
-	@Table(tableName = "arena")
+	private static final String TABLE_ARENA = "arena";
+	private static final String TABLE_WAREHOUSE = "warehouse";
+	private static final String INDEX_BY_STATUS = "by_status";
+	private static final String INDEX_TOURNAMENT_REGION = "TournamentRegionIndex";
+	private static final String INDEX_ORPHAN = "orphan";
+	private static final String ATTR_ROUND = "round";
+	private static final String ATTR_CREATED_AT = "createdAt";
+	private static final String ATTR_TOURNAMENT_ID = "tournamentId";
+	private static final String ATTR_REGION = "region";
+	private static final String ATTR_BRACKET = "bracket";
+	private static final String ATTR_MATCH_ID = "matchId";
+
+	@Table(tableName = TABLE_ARENA)
 	static class ShopRow {
 		@PartitionKey
 		String pk;
@@ -45,13 +60,13 @@ public class SecondaryIndexViewTest {
 		String gsi1sk;
 	}
 
-	@Table(tableName = "warehouse")
+	@Table(tableName = TABLE_WAREHOUSE)
 	static class WarehouseRow {
 		@PartitionKey
 		String pk;
 	}
 
-	@SecondaryIndex("by_status")
+	@SecondaryIndex(INDEX_BY_STATUS)
 	static class MatchesByRound {
 		@PartitionKey
 		String round;
@@ -60,7 +75,7 @@ public class SecondaryIndexViewTest {
 		String totalAmount;
 	}
 
-	@SecondaryIndex(name = "by_status", tableName = "arena")
+	@SecondaryIndex(name = INDEX_BY_STATUS, tableName = TABLE_ARENA)
 	static class MatchesByRoundExplicit {
 		@PartitionKey
 		String round;
@@ -68,7 +83,7 @@ public class SecondaryIndexViewTest {
 		String createdAt;
 	}
 
-	@SecondaryIndex(tableName = "arena", value = "TournamentRegionIndex")
+	@SecondaryIndex(tableName = TABLE_ARENA, value = INDEX_TOURNAMENT_REGION)
 	static class MatchesByTournamentRegion {
 		@PartitionKey(order = 0)
 		String tournamentId;
@@ -82,13 +97,13 @@ public class SecondaryIndexViewTest {
 		String matchId;
 	}
 
-	@SecondaryIndex(tableName = "arena")
+	@SecondaryIndex(tableName = TABLE_ARENA)
 	static class NoPartitionView {
 		@SortKey
 		String createdAt;
 	}
 
-	@SecondaryIndex(tableName = "arena")
+	@SecondaryIndex(tableName = TABLE_ARENA)
 	static class FivePartitionView {
 		@PartitionKey(order = 0)
 		String a;
@@ -102,7 +117,7 @@ public class SecondaryIndexViewTest {
 		String e;
 	}
 
-	@SecondaryIndex(tableName = "arena")
+	@SecondaryIndex(tableName = TABLE_ARENA)
 	static class GapSortKeyView {
 		@PartitionKey
 		String round;
@@ -112,7 +127,7 @@ public class SecondaryIndexViewTest {
 		String third;
 	}
 
-	@SecondaryIndex(tableName = "arena")
+	@SecondaryIndex(tableName = TABLE_ARENA)
 	@SortKeyTemplate("ROUND#{round}")
 	static class TemplateOnView {
 		@PartitionKey
@@ -120,7 +135,7 @@ public class SecondaryIndexViewTest {
 		String round;
 	}
 
-	@SecondaryIndex("orphan")
+	@SecondaryIndex(INDEX_ORPHAN)
 	static class OrphanView {
 		@PartitionKey
 		String pk;
@@ -134,111 +149,162 @@ public class SecondaryIndexViewTest {
 		return ctx;
 	}
 
-	@Test
-	void baseEntityIsNotAView() {
-		DynamoDbPersistentEntity<?> base = contextWithShopBase().getRequiredPersistentEntity(ShopRow.class);
-		assertFalse(base.isSecondaryIndexView());
-		assertNull(base.getIndexName());
+	@Nested
+	@DisplayName("Metadata flags")
+	class MetadataFlags {
+
+		@Test
+		@DisplayName("Base entity is not a secondary index view")
+		void isSecondaryIndexView_baseEntity_returnsFalse() {
+			DynamoDbPersistentEntity<?> base = contextWithShopBase().getRequiredPersistentEntity(ShopRow.class);
+
+			assertAll(() -> assertFalse(base.isSecondaryIndexView()), () -> assertNull(base.getIndexName()));
+		}
+
+		@Test
+		@DisplayName("View reports its index name via the value alias")
+		void isSecondaryIndexView_annotatedView_returnsTrueWithIndexName() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+
+			assertAll(() -> assertTrue(view.isSecondaryIndexView()),
+					() -> assertEquals(INDEX_BY_STATUS, view.getIndexName()));
+		}
 	}
 
-	@Test
-	void viewReportsItsIndexNameViaTheValueAlias() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+	@Nested
+	@DisplayName("Table resolution")
+	class TableResolution {
 
-		assertTrue(view.isSecondaryIndexView());
-		assertEquals("by_status", view.getIndexName());
+		@Test
+		@DisplayName("View resolves the single distinct base table when no explicit tableName")
+		void getTableName_singleBaseTable_resolvesImplicitly() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+
+			assertEquals(TABLE_ARENA, view.getTableName());
+		}
+
+		@Test
+		@DisplayName("View honours an explicit tableName")
+		void getTableName_explicitTableName_usesExplicit() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRoundExplicit.class);
+
+			assertAll(() -> assertEquals(INDEX_BY_STATUS, view.getIndexName()),
+					() -> assertEquals(TABLE_ARENA, view.getTableName()));
+		}
+
+		@Test
+		@DisplayName("Orphan view fails fast when table is requested")
+		void getTableName_orphanView_throwsIllegalState() {
+			DynamoDbMappingContext ctx = new DynamoDbMappingContext();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(OrphanView.class);
+
+			IllegalStateException ex = assertThrows(IllegalStateException.class, view::getTableName);
+			assertTrue(ex.getMessage().contains("cannot resolve its physical table"), ex.getMessage());
+		}
+
+		@Test
+		@DisplayName("View cannot resolve table when multiple distinct base tables exist")
+		void getTableName_multipleBaseTables_throwsIllegalState() {
+			DynamoDbMappingContext ctx = new DynamoDbMappingContext();
+			ctx.getRequiredPersistentEntity(ShopRow.class);
+			ctx.getRequiredPersistentEntity(WarehouseRow.class);
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+
+			IllegalStateException ex = assertThrows(IllegalStateException.class, view::getTableName);
+			assertTrue(ex.getMessage().contains(TABLE_ARENA) && ex.getMessage().contains(TABLE_WAREHOUSE),
+					ex.getMessage());
+		}
 	}
 
-	@Test
-	void viewResolvesTheSingleDistinctBaseTableWhenNoExplicitTableName() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+	@Nested
+	@DisplayName("Key schema")
+	class KeySchema {
 
-		assertEquals("arena", view.getTableName());
+		@Test
+		@DisplayName("View key schema is its own local schema")
+		void getKeySchema_simpleView_returnsLocalPartitionAndSort() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+
+			IndexKeySchema schema = view.getKeySchema();
+			assertAll(() -> assertEquals(1, schema.partitionKeys().size()),
+					() -> assertEquals(ATTR_ROUND, schema.partitionKeys().get(0).getName()),
+					() -> assertEquals(ATTR_CREATED_AT, schema.singleSortKey().getName()),
+					() -> assertEquals(1, view.getKeySchema().partitionKeys().size()));
+		}
+
+		@Test
+		@DisplayName("Multi-attribute view orders partition and sort components left to right")
+		void getKeySchema_multiAttribute_ordersComponentsCorrectly() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
+
+			DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByTournamentRegion.class);
+
+			IndexKeySchema schema = view.getKeySchema();
+			assertAll(
+					() -> assertEquals(List.of(ATTR_TOURNAMENT_ID, ATTR_REGION),
+							schema.partitionKeys().stream().map(p -> p.getName()).toList()),
+					() -> assertEquals(List.of(ATTR_ROUND, ATTR_BRACKET, ATTR_MATCH_ID),
+							schema.sortKeys().stream().map(p -> p.getName()).toList()));
+		}
 	}
 
-	@Test
-	void viewHonoursAnExplicitTableName() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRoundExplicit.class);
+	@Nested
+	@DisplayName("Validation rejections")
+	class ValidationRejections {
 
-		assertEquals("by_status", view.getIndexName());
-		assertEquals("arena", view.getTableName());
-	}
+		@Test
+		@DisplayName("View with no partition key is rejected")
+		void validate_noPartitionKey_throwsMappingException() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
 
-	@Test
-	void viewKeySchemaIsItsOwnLocalSchema() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
+			MappingException ex = assertThrows(MappingException.class,
+					() -> ctx.getRequiredPersistentEntity(NoPartitionView.class));
 
-		IndexKeySchema schema = view.getKeySchema();
-		assertEquals(1, schema.partitionKeys().size());
-		assertEquals("round", schema.partitionKeys().get(0).getName());
-		assertEquals("createdAt", schema.singleSortKey().getName());
-		assertEquals(1, view.getKeySchema().partitionKeys().size());
-	}
+			assertTrue(allMessages(ex).contains("1-4 @PartitionKey"), allMessages(ex));
+		}
 
-	@Test
-	void multiAttributeViewOrdersPartitionAndSortComponentsLeftToRight() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByTournamentRegion.class);
+		@Test
+		@DisplayName("View with more than four partition keys is rejected")
+		void validate_fivePartitionKeys_throwsMappingException() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
 
-		IndexKeySchema schema = view.getKeySchema();
-		assertEquals(List.of("tournamentId", "region"), schema.partitionKeys().stream().map(p -> p.getName()).toList());
-		assertEquals(List.of("round", "bracket", "matchId"), schema.sortKeys().stream().map(p -> p.getName()).toList());
-	}
+			MappingException ex = assertThrows(MappingException.class,
+					() -> ctx.getRequiredPersistentEntity(FivePartitionView.class));
 
-	@Test
-	void viewWithNoPartitionKeyIsRejected() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		MappingException ex = assertThrows(MappingException.class,
-				() -> ctx.getRequiredPersistentEntity(NoPartitionView.class));
-		assertTrue(allMessages(ex).contains("1-4 @PartitionKey"), allMessages(ex));
-	}
+			assertTrue(allMessages(ex).contains("at most 4 @PartitionKey"), allMessages(ex));
+		}
 
-	@Test
-	void viewWithMoreThanFourPartitionKeysIsRejected() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		MappingException ex = assertThrows(MappingException.class,
-				() -> ctx.getRequiredPersistentEntity(FivePartitionView.class));
-		assertTrue(allMessages(ex).contains("at most 4 @PartitionKey"), allMessages(ex));
-	}
+		@Test
+		@DisplayName("View with non-contiguous sort key order is rejected")
+		void validate_gapInSortKeyOrder_throwsMappingException() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
 
-	@Test
-	void viewWithANonContiguousSortKeyOrderIsRejected() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		MappingException ex = assertThrows(MappingException.class,
-				() -> ctx.getRequiredPersistentEntity(GapSortKeyView.class));
-		assertTrue(allMessages(ex).contains("contiguous"), allMessages(ex));
-	}
+			MappingException ex = assertThrows(MappingException.class,
+					() -> ctx.getRequiredPersistentEntity(GapSortKeyView.class));
 
-	@Test
-	void viewDeclaringASortKeyTemplateIsRejected() {
-		DynamoDbMappingContext ctx = contextWithShopBase();
-		MappingException ex = assertThrows(MappingException.class,
-				() -> ctx.getRequiredPersistentEntity(TemplateOnView.class));
-		assertTrue(allMessages(ex).contains("@SortKeyTemplate"), allMessages(ex));
-	}
+			assertTrue(allMessages(ex).contains("contiguous"), allMessages(ex));
+		}
 
-	@Test
-	void viewThatCannotResolveItsTableFailsFastWhenTheTableIsRequested() {
-		DynamoDbMappingContext ctx = new DynamoDbMappingContext();
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(OrphanView.class);
+		@Test
+		@DisplayName("View declaring a @SortKeyTemplate is rejected")
+		void validate_sortKeyTemplateOnView_throwsMappingException() {
+			DynamoDbMappingContext ctx = contextWithShopBase();
 
-		IllegalStateException ex = assertThrows(IllegalStateException.class, view::getTableName);
-		assertTrue(ex.getMessage().contains("cannot resolve its physical table"), ex.getMessage());
-	}
+			MappingException ex = assertThrows(MappingException.class,
+					() -> ctx.getRequiredPersistentEntity(TemplateOnView.class));
 
-	@Test
-	void viewCannotResolveTableWhenMultipleDistinctBaseTablesExist() {
-		DynamoDbMappingContext ctx = new DynamoDbMappingContext();
-		ctx.getRequiredPersistentEntity(ShopRow.class);
-		ctx.getRequiredPersistentEntity(WarehouseRow.class);
-		DynamoDbPersistentEntity<?> view = ctx.getRequiredPersistentEntity(MatchesByRound.class);
-
-		IllegalStateException ex = assertThrows(IllegalStateException.class, view::getTableName);
-		assertTrue(ex.getMessage().contains("arena") && ex.getMessage().contains("warehouse"), ex.getMessage());
+			assertTrue(allMessages(ex).contains("@SortKeyTemplate"), allMessages(ex));
+		}
 	}
 
 	private static String allMessages(Throwable throwable) {

@@ -15,7 +15,8 @@
  */
 package io.awspring.cloud.dynamodb.config;
 
-import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
+import io.awspring.cloud.dynamodb.core.mapping.AggregateTable;
+import io.awspring.cloud.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.lang.annotation.Annotation;
 import java.util.Arrays;
@@ -29,6 +30,10 @@ import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.ObjectUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbEntityClassScanner {
 
 	private Set<String> entityBasePackages = new HashSet<>();
@@ -73,7 +78,6 @@ public class DynamoDbEntityClassScanner {
 
 	public void setEntityBasePackages(Collection<String> entityBasePackages) {
 		this.entityBasePackages = new HashSet<>(entityBasePackages);
-		;
 	}
 
 	public Set<String> getEntityBasePackages() {
@@ -134,6 +138,6 @@ public class DynamoDbEntityClassScanner {
 
 	@SuppressWarnings("unchecked")
 	protected Class<? extends Annotation>[] getEntityAnnotations() {
-		return new Class[] { Table.class, PartitionKey.class };
+		return new Class[] { Table.class, SecondaryIndex.class, AggregateTable.class };
 	}
 }

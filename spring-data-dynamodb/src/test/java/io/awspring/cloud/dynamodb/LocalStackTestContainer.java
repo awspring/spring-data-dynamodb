@@ -19,8 +19,12 @@ import org.junit.Rule;
 import org.testcontainers.containers.localstack.LocalStackContainer;
 import org.testcontainers.utility.DockerImageName;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class LocalStackTestContainer {
-	static DockerImageName localstackImage = DockerImageName.parse("localstack/localstack:latest");
+	static DockerImageName localstackImage = DockerImageName.parse("localstack/localstack:4.4.0");
 
 	@Rule
 	public static LocalStackContainer localstack;

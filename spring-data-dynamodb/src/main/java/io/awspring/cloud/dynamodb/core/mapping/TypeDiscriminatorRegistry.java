@@ -21,6 +21,10 @@ import java.util.Map;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class TypeDiscriminatorRegistry {
 
 	private final String discriminatorColumn;

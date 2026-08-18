@@ -21,6 +21,10 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.data.convert.EntityWriter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 interface DynamoDbWriter<T> extends EntityWriter<T, Map<String, AttributeValue>> {
 	AttributeValue convertToDynamoDbType(@Nullable Object obj, DynamoDbPersistentEntity<?> entity);
 

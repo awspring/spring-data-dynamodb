@@ -29,12 +29,14 @@ import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Date;
 import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.core.convert.converter.Converter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class DynamoDbConvertersTest {
+@DisplayName("DynamoDb converters -- scalar type conversions")
+class DynamoDbConvertersTest {
 
 	@Test
 	void dateRoundTripsThroughIso8601() {

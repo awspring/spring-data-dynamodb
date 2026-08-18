@@ -15,26 +15,15 @@
  */
 package io.awspring.cloud.dynamodb.core.mapping;
 
-public final class KeyRole {
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+public record KeyRole(KeyRole.KeyType keyType,int order){
 
-	public enum KeyType {
-		PARTITION, SORT
-	}
+public enum KeyType {
+	PARTITION, SORT
 
-	private final KeyType keyType;
-	private final int order;
-
-	public KeyRole(KeyType keyType, int order) {
-		this.keyType = keyType;
-		this.order = order;
-	}
-
-	public KeyType keyType() {
-		return keyType;
-	}
-
-	public int order() {
-		return order;
 	}
 
 	@Override

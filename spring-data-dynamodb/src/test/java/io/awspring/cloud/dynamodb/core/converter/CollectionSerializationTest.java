@@ -34,11 +34,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class CollectionSerializationTest {
+@DisplayName("Collection serialization -- List/Set/Map round-trips")
+class CollectionSerializationTest {
 
 	private DynamoDbMappingContext mappingContext;
 	private MappingDynamoDbConverter converter;

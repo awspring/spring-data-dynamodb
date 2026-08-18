@@ -36,6 +36,10 @@ import org.springframework.util.Assert;
 import org.springframework.util.NumberUtils;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbConverters {
 
 	static Collection<Object> getConvertersToRegister() {

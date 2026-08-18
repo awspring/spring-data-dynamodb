@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,66 +26,19 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 
-public class SortKeyTemplateVerifierTest {
+class SortKeyTemplateVerifierTest {
 
-	@Table(tableName = "only_template")
-	@SortKeyTemplate("MATCH#{year}#{round}")
-	static class OnlyTemplateEntity {
-		@PartitionKey
-		String tournamentId;
-		int year;
-		String round;
-	}
-
-	@Table(tableName = "conflict_base")
-	@SortKeyTemplate("MATCH#{year}#{round}")
-	static class ConflictBaseTableEntity {
-		@PartitionKey
-		String tournamentId;
-		@SortKey
-		String sk;
-		int year;
-		String round;
-	}
-
-	@Table(tableName = "unknown_prop")
-	@SortKeyTemplate("MATCH#{doesNotExist}")
-	static class UnknownPropertyEntity {
-		@PartitionKey
-		String pk;
-	}
+	private static final String TABLE_ONLY_TEMPLATE = "only_template";
+	private static final String TABLE_CONFLICT_BASE = "conflict_base";
+	private static final String TABLE_UNKNOWN_PROP = "unknown_prop";
 
 	private static DynamoDbMappingContext newContext() {
 		return new DynamoDbMappingContext();
-	}
-
-	@Test
-	void entityWithOnlyASortKeyTemplateVerifiesCleanly() {
-		DynamoDbMappingContext ctx = newContext();
-		DynamoDbPersistentEntity<?> entity = ctx.getRequiredPersistentEntity(OnlyTemplateEntity.class);
-
-		assertNotNull(entity);
-		assertTrue(entity.getKeySchema().sortKeys().isEmpty());
-	}
-
-	@Test
-	void bothSortKeyAndTemplateOnBaseTableThrowsNamingTheEntity() {
-		DynamoDbMappingContext ctx = newContext();
-
-		MappingException ex = assertThrows(MappingException.class,
-				() -> ctx.getRequiredPersistentEntity(ConflictBaseTableEntity.class));
-		assertTrue(allMessages(ex).contains(ConflictBaseTableEntity.class.getName()),
-				"conflict message should name the entity type; was: " + allMessages(ex));
-	}
-
-	@Test
-	void templateReferencingUnknownPropertyThrowsAtSameBootstrapPoint() {
-		DynamoDbMappingContext ctx = newContext();
-
-		assertThrows(MappingException.class, () -> ctx.getRequiredPersistentEntity(UnknownPropertyEntity.class));
 	}
 
 	private static String allMessages(Throwable throwable) {
@@ -100,5 +54,74 @@ public class SortKeyTemplateVerifierTest {
 			}
 		}
 		return builder.toString();
+	}
+
+	@Nested
+	@DisplayName("ValidEntities")
+	class ValidEntities {
+
+		@Test
+		@DisplayName("entity with only a sort-key template verifies cleanly")
+		void getEntity_onlyTemplate_verifies() {
+			DynamoDbMappingContext ctx = newContext();
+
+			DynamoDbPersistentEntity<?> entity = ctx.getRequiredPersistentEntity(OnlyTemplateEntity.class);
+
+			assertAll(() -> assertNotNull(entity), () -> assertTrue(entity.getKeySchema().sortKeys().isEmpty()));
+		}
+	}
+
+	@Nested
+	@DisplayName("ValidationRejections")
+	class ValidationRejections {
+
+		@Test
+		@DisplayName("both @SortKey and @SortKeyTemplate on base table throws naming the entity")
+		void getEntity_sortKeyAndTemplate_throwsNamingEntity() {
+			DynamoDbMappingContext ctx = newContext();
+
+			MappingException ex = assertThrows(MappingException.class,
+					() -> ctx.getRequiredPersistentEntity(ConflictBaseTableEntity.class));
+
+			assertTrue(allMessages(ex).contains(ConflictBaseTableEntity.class.getName()),
+					"conflict message should name the entity type; was: " + allMessages(ex));
+		}
+
+		@Test
+		@DisplayName("template referencing unknown property throws at bootstrap")
+		void getEntity_unknownTemplateProperty_throws() {
+			DynamoDbMappingContext ctx = newContext();
+
+			assertThrows(MappingException.class, () -> ctx.getRequiredPersistentEntity(UnknownPropertyEntity.class));
+		}
+	}
+
+	// --- Test fixtures ---
+
+	@Table(tableName = TABLE_ONLY_TEMPLATE)
+	@SortKeyTemplate("MATCH#{year}#{round}")
+	static class OnlyTemplateEntity {
+		@PartitionKey
+		String tournamentId;
+		int year;
+		String round;
+	}
+
+	@Table(tableName = TABLE_CONFLICT_BASE)
+	@SortKeyTemplate("MATCH#{year}#{round}")
+	static class ConflictBaseTableEntity {
+		@PartitionKey
+		String tournamentId;
+		@SortKey
+		String sk;
+		int year;
+		String round;
+	}
+
+	@Table(tableName = TABLE_UNKNOWN_PROP)
+	@SortKeyTemplate("MATCH#{doesNotExist}")
+	static class UnknownPropertyEntity {
+		@PartitionKey
+		String pk;
 	}
 }

@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.core.mapping;
 import java.util.Comparator;
 import java.util.Objects;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public enum DynamoDbPersistentPropertyComparator implements Comparator<DynamoDbPersistentProperty> {
 
 	INSTANCE;

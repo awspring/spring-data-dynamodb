@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,14 +25,29 @@ import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.repository.query.DefaultParameters;
 import org.springframework.data.repository.query.ParametersParameterAccessor;
+import org.springframework.data.repository.query.ParametersSource;
 import org.springframework.data.repository.query.parser.PartTree;
 
-public class SortKeyTemplateQueryCreatorTest {
+@DisplayName("SortKeyTemplateQueryCreator")
+class SortKeyTemplateQueryCreatorTest {
 
-	@Table(tableName = "orders")
-	@SortKeyTemplate("MATCH#{year}#{round}")
+	private static final String TABLE_NAME = "orders";
+	private static final String SORT_KEY_TEMPLATE = "MATCH#{year}#{round}";
+	private static final String PARTITION_KEY = "cust-1";
+	private static final int YEAR = 2024;
+	private static final String ROUND = "QUARTERFINAL";
+	private static final String EXPECTED_PREFIX = "MATCH#2024#";
+	private static final String EXPECTED_FULL_KEY = "MATCH#2024#QUARTERFINAL";
+	private static final String SORT_KEY_COLUMN = "sk";
+	private static final String PARTITION_FIELD = "tournamentId";
+
+	@Table(tableName = TABLE_NAME)
+	@SortKeyTemplate(SORT_KEY_TEMPLATE)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -63,9 +79,7 @@ public class SortKeyTemplateQueryCreatorTest {
 	private static DynamoDbQuerySpec createSpec(DynamoDbMappingContext context, String methodName, Object... args) {
 		PartTree tree = new PartTree(methodName, Match.class);
 		ParametersParameterAccessor accessor = new ParametersParameterAccessor(
-				new org.springframework.data.repository.query.DefaultParameters(
-						org.springframework.data.repository.query.ParametersSource.of(resolveMethod(methodName, args))),
-				args);
+				new DefaultParameters(ParametersSource.of(resolveMethod(methodName, args))), args);
 		return new DynamoDbQueryCreator(tree, accessor, context, Match.class).createQuery();
 	}
 
@@ -82,47 +96,73 @@ public class SortKeyTemplateQueryCreatorTest {
 		}
 	}
 
-	@Test
-	void leadingPlaceholderSubsetProducesABeginsWithConditionOnTheComposedPrefix() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByTournamentIdAndYear", "cust-1", 2024);
+	@Nested
+	@DisplayName("Partial placeholder binding")
+	class PartialPlaceholderBinding {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("cust-1", spec.partitionEquals().get("tournamentId"));
+		@Test
+		@DisplayName("leading placeholder subset produces a begins_with condition on the composed prefix")
+		void leadingPlaceholderSubsetProducesABeginsWithConditionOnTheComposedPrefix() {
+			// Arrange
+			DynamoDbMappingContext context = newContext();
 
-		assertEquals(1, spec.sortConditions().size());
-		DynamoDbQuerySpec.SortCondition condition = spec.sortConditions().get(0);
-		assertEquals("sk", condition.columnName());
-		assertEquals(DynamoDbQuerySpec.SortCondition.Op.BEGINS_WITH, condition.op());
-		assertEquals("MATCH#2024#", condition.value());
-		assertNull(spec.filterExpression());
+			// Act
+			DynamoDbQuerySpec spec = createSpec(context, "findByTournamentIdAndYear", PARTITION_KEY, YEAR);
+
+			// Assert
+			DynamoDbQuerySpec.SortCondition condition = spec.sortConditions().get(0);
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals("", spec.indexName()),
+					() -> assertEquals(PARTITION_KEY, spec.partitionEquals().get(PARTITION_FIELD)),
+					() -> assertEquals(1, spec.sortConditions().size()),
+					() -> assertEquals(SORT_KEY_COLUMN, condition.columnName()),
+					() -> assertEquals(DynamoDbQuerySpec.SortCondition.Op.BEGINS_WITH, condition.op()),
+					() -> assertEquals(EXPECTED_PREFIX, condition.value()), () -> assertNull(spec.filterExpression()));
+		}
 	}
 
-	@Test
-	void allPlaceholdersBoundProducesAnExactEqConditionOnTheFullyComposedString() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByTournamentIdAndYearAndRound", "cust-1", 2024,
-				"QUARTERFINAL");
+	@Nested
+	@DisplayName("Full placeholder binding")
+	class FullPlaceholderBinding {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("cust-1", spec.partitionEquals().get("tournamentId"));
+		@Test
+		@DisplayName("all placeholders bound produces an exact EQ condition on the fully composed string")
+		void allPlaceholdersBoundProducesAnExactEqConditionOnTheFullyComposedString() {
+			// Arrange
+			DynamoDbMappingContext context = newContext();
 
-		assertEquals(1, spec.sortConditions().size());
-		DynamoDbQuerySpec.SortCondition condition = spec.sortConditions().get(0);
-		assertEquals("sk", condition.columnName());
-		assertEquals(DynamoDbQuerySpec.SortCondition.Op.EQ, condition.op());
-		assertEquals("MATCH#2024#QUARTERFINAL", condition.value());
-		assertNull(spec.filterExpression());
+			// Act
+			DynamoDbQuerySpec spec = createSpec(context, "findByTournamentIdAndYearAndRound", PARTITION_KEY, YEAR,
+					ROUND);
+
+			// Assert
+			DynamoDbQuerySpec.SortCondition condition = spec.sortConditions().get(0);
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals("", spec.indexName()),
+					() -> assertEquals(PARTITION_KEY, spec.partitionEquals().get(PARTITION_FIELD)),
+					() -> assertEquals(1, spec.sortConditions().size()),
+					() -> assertEquals(SORT_KEY_COLUMN, condition.columnName()),
+					() -> assertEquals(DynamoDbQuerySpec.SortCondition.Op.EQ, condition.op()),
+					() -> assertEquals(EXPECTED_FULL_KEY, condition.value()),
+					() -> assertNull(spec.filterExpression()));
+		}
 	}
 
-	@Test
-	void partitionKeyAloneProducesAPartitionOnlySpecWithNoSortCondition() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByTournamentId", "cust-1");
+	@Nested
+	@DisplayName("Partition key only")
+	class PartitionKeyOnly {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("cust-1", spec.partitionEquals().get("tournamentId"));
-		assertTrue(spec.sortConditions().isEmpty());
-		assertNull(spec.filterExpression());
+		@Test
+		@DisplayName("partition key alone produces a partition-only spec with no sort condition")
+		void partitionKeyAloneProducesAPartitionOnlySpecWithNoSortCondition() {
+			// Arrange
+			DynamoDbMappingContext context = newContext();
+
+			// Act
+			DynamoDbQuerySpec spec = createSpec(context, "findByTournamentId", PARTITION_KEY);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals("", spec.indexName()),
+					() -> assertEquals(PARTITION_KEY, spec.partitionEquals().get(PARTITION_FIELD)),
+					() -> assertTrue(spec.sortConditions().isEmpty()), () -> assertNull(spec.filterExpression()));
+		}
 	}
 }

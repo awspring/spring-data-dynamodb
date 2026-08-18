@@ -21,6 +21,10 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.Objects;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "arena")
 public class MatchTable {
 	@PartitionKey

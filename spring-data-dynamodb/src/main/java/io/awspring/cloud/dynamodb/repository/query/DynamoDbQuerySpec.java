@@ -24,6 +24,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class DynamoDbQuerySpec {
 
 	@Nullable
@@ -178,13 +182,15 @@ public final class DynamoDbQuerySpec {
 
 	private static final Pattern NAME_PLACEHOLDER = Pattern.compile("#[A-Za-z0-9_]+");
 
-	private Map<String, String> resolveExpressionAttributeNames(@Nullable String filterExpression) {
+	public Map<String, String> resolveExpressionAttributeNames(@Nullable String... expressions) {
 		Map<String, String> names = new LinkedHashMap<>(expressionAttributeNames);
-		if (filterExpression != null) {
-			Matcher matcher = NAME_PLACEHOLDER.matcher(filterExpression);
+		for (String expression : expressions) {
+			if (expression == null) {
+				continue;
+			}
+			Matcher matcher = NAME_PLACEHOLDER.matcher(expression);
 			while (matcher.find()) {
-				String placeholder = matcher.group();
-				names.computeIfAbsent(placeholder, p -> p.substring(1));
+				names.computeIfAbsent(matcher.group(), placeholder -> placeholder.substring(1));
 			}
 		}
 		return names;

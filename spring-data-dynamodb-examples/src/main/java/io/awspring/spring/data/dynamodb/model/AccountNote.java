@@ -13,10 +13,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.cloud.dynamodb.request;
+package io.awspring.spring.data.dynamodb.model;
 
-@FunctionalInterface
-public interface DynamoDbQueryRequestInterface {
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+public class AccountNote {
 
-	DynamoDbQueryRequest build(DynamoDbQueryRequest.Builder builder);
+	private String text;
+
+	public AccountNote() {
+	}
+
+	public static AccountNote of(String text) {
+		AccountNote note = new AccountNote();
+		note.text = text;
+		return note;
+	}
+
+	public String getText() {
+		return text;
+	}
+
+	public void setText(String text) {
+		this.text = text;
+	}
 }

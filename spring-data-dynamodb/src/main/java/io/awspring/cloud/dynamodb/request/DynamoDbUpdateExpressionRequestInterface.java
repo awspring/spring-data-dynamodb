@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.request;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @FunctionalInterface
 public interface DynamoDbUpdateExpressionRequestInterface {
 

@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -25,13 +26,30 @@ import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
+import java.lang.reflect.Method;
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.repository.query.DefaultParameters;
 import org.springframework.data.repository.query.ParametersParameterAccessor;
+import org.springframework.data.repository.query.ParametersSource;
 import org.springframework.data.repository.query.parser.PartTree;
 
-public class DynamoDbQueryCreatorTest {
+@DisplayName("DynamoDbQueryCreator")
+class DynamoDbQueryCreatorTest {
 
-	@Table(tableName = "single_sort_key")
+	private static final String TABLE_NAME = "single_sort_key";
+	private static final String PK_VALUE = "pk-1";
+	private static final String SK_VALUE = "sk-1";
+	private static final String ROUND_ACTIVE = "ACTIVE";
+	private static final String ROUND_PENDING = "PENDING";
+	private static final String ROUND_CLOSED = "CLOSED";
+	private static final String BASE_TABLE_INDEX = "";
+	private static final int EXPECTED_IN_PLACEHOLDER_COUNT = 3;
+
+	@Table(tableName = TABLE_NAME)
 	static class Entity {
 		@PartitionKey
 		String pk;
@@ -70,7 +88,7 @@ public class DynamoDbQueryCreatorTest {
 			return null;
 		}
 
-		public Entity findByRoundIn(java.util.List<String> rounds) {
+		public Entity findByRoundIn(List<String> rounds) {
 			return null;
 		}
 	}
@@ -84,16 +102,14 @@ public class DynamoDbQueryCreatorTest {
 	private static DynamoDbQuerySpec createSpec(DynamoDbMappingContext context, String methodName, Object... args) {
 		PartTree tree = new PartTree(methodName, Entity.class);
 		ParametersParameterAccessor accessor = new ParametersParameterAccessor(
-				new org.springframework.data.repository.query.DefaultParameters(
-						org.springframework.data.repository.query.ParametersSource.of(resolveMethod(methodName, args))),
-				args);
+				new DefaultParameters(ParametersSource.of(resolveMethod(methodName, args))), args);
 		return new DynamoDbQueryCreator(tree, accessor, context, Entity.class).createQuery();
 	}
 
-	private static java.lang.reflect.Method resolveMethod(String methodName, Object... args) {
+	private static Method resolveMethod(String methodName, Object... args) {
 		Class<?>[] paramTypes = new Class<?>[args.length];
 		for (int i = 0; i < args.length; i++) {
-			paramTypes[i] = args[i] instanceof java.util.List ? java.util.List.class : String.class;
+			paramTypes[i] = args[i] instanceof List ? List.class : String.class;
 		}
 		try {
 			return Entity.class.getMethod(methodName, paramTypes);
@@ -103,126 +119,179 @@ public class DynamoDbQueryCreatorTest {
 		}
 	}
 
-	@Test
-	void singlePartitionEqualitySelectsBaseTable() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPk", "pk-1");
+	@Nested
+	@DisplayName("Partition key equality (base table)")
+	class PartitionKeyEqualityTests {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("pk-1", spec.partitionEquals().get("pk"));
-		assertTrue(spec.sortConditions().isEmpty());
-		assertNull(spec.filterExpression());
+		@Test
+		@DisplayName("single partition equality selects the base table with no sort condition")
+		void singlePartitionEqualitySelectsBaseTable() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPk", PK_VALUE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals(BASE_TABLE_INDEX, spec.indexName()),
+					() -> assertEquals(PK_VALUE, spec.partitionEquals().get("pk")),
+					() -> assertTrue(spec.sortConditions().isEmpty()), () -> assertNull(spec.filterExpression()));
+		}
+
+		@Test
+		@DisplayName("partition + sort equality selects the base table with both conditions")
+		void partitionAndSortEqualitySelectsBaseTableWithBothConditions() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSk", PK_VALUE, SK_VALUE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals(BASE_TABLE_INDEX, spec.indexName()),
+					() -> assertEquals(PK_VALUE, spec.partitionEquals().get("pk")),
+					() -> assertEquals(1, spec.sortConditions().size()),
+					() -> assertEquals("sk", spec.sortConditions().get(0).columnName()),
+					() -> assertEquals(SK_VALUE, spec.sortConditions().get(0).value()),
+					() -> assertNull(spec.filterExpression()));
+		}
+
+		@Test
+		@DisplayName("key condition atoms bind raw values directly without ExpressionAttributeValues")
+		void keyConditionAtomsBindRawValues() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSk", PK_VALUE, SK_VALUE);
+
+			// Assert
+			assertAll(() -> assertTrue(spec.expressionAttributeValues().isEmpty()),
+					() -> assertTrue(spec.expressionAttributeNames().isEmpty()));
+		}
 	}
 
-	@Test
-	void partitionAndSortEqualitySelectsBaseTableWithBothConditions() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSk", "pk-1", "sk-1");
+	@Nested
+	@DisplayName("Non-key predicates and filter expressions")
+	class FilterExpressionTests {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("pk-1", spec.partitionEquals().get("pk"));
-		assertEquals(1, spec.sortConditions().size());
-		assertEquals("sk", spec.sortConditions().get(0).columnName());
-		assertEquals("sk-1", spec.sortConditions().get(0).value());
-		assertNull(spec.filterExpression());
+		@Test
+		@DisplayName("a non-key attribute after the sort key becomes a filter fragment")
+		void nonKeyEqualityAfterSortKeyBecomesFilterFragment() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSkAndRound", PK_VALUE, SK_VALUE,
+					ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertEquals(BASE_TABLE_INDEX, spec.indexName()),
+					() -> assertEquals(PK_VALUE, spec.partitionEquals().get("pk")),
+					() -> assertEquals(1, spec.sortConditions().size()),
+					() -> assertEquals("sk", spec.sortConditions().get(0).columnName()),
+					() -> assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("=")));
+		}
+
+		@Test
+		@DisplayName("a non-key equality alone falls back to scan")
+		void equalityOnNonKeyAttributeAloneFallsBackToScan() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByRound", ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertTrue(spec.requiresScan()), () -> assertNull(spec.indexName()),
+					() -> assertTrue(spec.partitionEquals().isEmpty()),
+					() -> assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("=")));
+		}
+
+		@Test
+		@DisplayName("filter fragment values are threaded into ExpressionAttributeValues")
+		void filterFragmentValuesThreadedIntoExpressionAttributeValues() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByRound", ROUND_ACTIVE);
+
+			// Assert
+			assertTrue(spec.requiresScan());
+			String fragment = spec.filterExpression();
+			String namePlaceholder = fragment.substring(0, fragment.indexOf(' '));
+			String valuePlaceholder = fragment.substring(fragment.indexOf('=') + 2);
+
+			assertAll(() -> assertEquals("round", spec.expressionAttributeNames().get(namePlaceholder)),
+					() -> assertEquals(ROUND_ACTIVE, spec.expressionAttributeValues().get(valuePlaceholder)));
+		}
+
+		@Test
+		@DisplayName("a demoted equality atom still gets its ExpressionAttributeValue")
+		void demotedEqualityAtomStillGetsExpressionAttributeValue() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSkAndRound", PK_VALUE, SK_VALUE,
+					ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.filterExpression() == null),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(ROUND_ACTIVE)));
+		}
 	}
 
-	@Test
-	void nonKeyEqualityAfterSortKeyBecomesAFilterFragmentNotAKeyCondition() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSkAndRound", "pk-1", "sk-1", "ACTIVE");
+	@Nested
+	@DisplayName("OR and inequality operators")
+	class OrAndInequalityTests {
 
-		assertFalse(spec.requiresScan());
-		assertEquals("", spec.indexName());
-		assertEquals("pk-1", spec.partitionEquals().get("pk"));
-		assertEquals(1, spec.sortConditions().size());
-		assertEquals("sk", spec.sortConditions().get(0).columnName());
-		assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("="));
+		@Test
+		@DisplayName("OR across different properties forces a scan even when one side is a partition key")
+		void orAcrossDifferentPropertiesForcesScan() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkOrRound", PK_VALUE, ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertTrue(spec.requiresScan()),
+					() -> assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("OR")));
+		}
+
+		@Test
+		@DisplayName("OR branch fragment values are threaded into ExpressionAttributeValues")
+		void orBranchFragmentValuesThreadedIntoExpressionAttributeValues() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkOrRound", PK_VALUE, ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertTrue(spec.requiresScan()),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(PK_VALUE)),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(ROUND_ACTIVE)));
+		}
+
+		@Test
+		@DisplayName("inequality on the partition key forces a scan")
+		void inequalityOnPartitionKeyForcesScan() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkGreaterThan", PK_VALUE);
+
+			// Assert
+			assertAll(() -> assertTrue(spec.requiresScan()),
+					() -> assertTrue(spec.filterExpression() != null && spec.filterExpression().contains(">")));
+		}
 	}
 
-	@Test
-	void equalityOnANonKeyAttributeAloneFallsBackToScan() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByRound", "ACTIVE");
+	@Nested
+	@DisplayName("Unsupported keywords and IN expansion")
+	class UnsupportedAndInTests {
 
-		assertTrue(spec.requiresScan());
-		assertNull(spec.indexName());
-		assertTrue(spec.partitionEquals().isEmpty());
-		assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("="));
-	}
+		@Test
+		@DisplayName("an unsupported keyword throws rather than silently mistranslating")
+		void unsupportedKeywordThrows() {
+			// Act & Assert
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> createSpec(newContext(), "findByPkEndingWith", PK_VALUE));
+		}
 
-	@Test
-	void orAcrossDifferentPropertiesIsNeverPartOfTheKeyConditionEvenWhenOneSideIsAPartitionKey() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkOrRound", "pk-1", "ACTIVE");
+		@Test
+		@DisplayName("IN expands the collection into one placeholder per element")
+		void inExpandsCollectionIntoOnePlaceholderPerElement() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(newContext(), "findByRoundIn",
+					List.of(ROUND_ACTIVE, ROUND_PENDING, ROUND_CLOSED));
 
-		assertTrue(spec.requiresScan());
-		assertTrue(spec.filterExpression() != null && spec.filterExpression().contains("OR"));
-	}
+			// Assert
+			assertTrue(spec.requiresScan());
+			String fragment = spec.filterExpression();
+			assertTrue(fragment.contains(" IN ("));
+			long placeholderCount = spec.expressionAttributeValues().values().stream().filter(v -> v instanceof String)
+					.count();
 
-	@Test
-	void inequalityOnThePartitionKeyIsNeverAKeyConditionEvenAsTheOnlyPredicate() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkGreaterThan", "pk-1");
-
-		assertTrue(spec.requiresScan());
-		assertTrue(spec.filterExpression() != null && spec.filterExpression().contains(">"));
-	}
-
-	@Test
-	void unsupportedKeywordThrowsRatherThanSilentlyMistranslating() {
-		assertThrows(org.springframework.dao.InvalidDataAccessApiUsageException.class,
-				() -> createSpec(newContext(), "findByPkEndingWith", "pk-1"));
-	}
-
-	@Test
-	void filterFragmentValuesAreThreadedIntoExpressionAttributeValuesNotDiscarded() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByRound", "ACTIVE");
-
-		assertTrue(spec.requiresScan());
-		String fragment = spec.filterExpression();
-		String namePlaceholder = fragment.substring(0, fragment.indexOf(' '));
-		String valuePlaceholder = fragment.substring(fragment.indexOf('=') + 2);
-		assertEquals("round", spec.expressionAttributeNames().get(namePlaceholder));
-		assertEquals("ACTIVE", spec.expressionAttributeValues().get(valuePlaceholder));
-	}
-
-	@Test
-	void keyConditionEqualityAtomsDoNotNeedExpressionAttributeValuesTheyBindRawValuesDirectly() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSk", "pk-1", "sk-1");
-
-		assertTrue(spec.expressionAttributeValues().isEmpty());
-		assertTrue(spec.expressionAttributeNames().isEmpty());
-	}
-
-	@Test
-	void demotedEqualityAtomStillGetsItsExpressionAttributeValueEvenThoughItStartedAsAKeyCandidate() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkAndSkAndRound", "pk-1", "sk-1", "ACTIVE");
-
-		assertFalse(spec.filterExpression() == null);
-		boolean foundActiveValue = spec.expressionAttributeValues().containsValue("ACTIVE");
-		assertTrue(foundActiveValue);
-	}
-
-	@Test
-	void orBranchFragmentValuesAreAlsoThreadedNotJustTheFragmentText() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByPkOrRound", "pk-1", "ACTIVE");
-
-		assertTrue(spec.requiresScan());
-		assertTrue(spec.expressionAttributeValues().containsValue("pk-1"));
-		assertTrue(spec.expressionAttributeValues().containsValue("ACTIVE"));
-	}
-
-	@Test
-	void inExpandsTheBoundCollectionIntoOnePlaceholderPerElementRatherThanOneForTheWholeList() {
-		DynamoDbQuerySpec spec = createSpec(newContext(), "findByRoundIn",
-				java.util.List.of("ACTIVE", "PENDING", "CLOSED"));
-
-		assertTrue(spec.requiresScan());
-		String fragment = spec.filterExpression();
-		assertTrue(fragment.contains(" IN ("));
-		long placeholderCount = spec.expressionAttributeValues().values().stream().filter(v -> v instanceof String)
-				.count();
-		assertEquals(3, placeholderCount);
-		assertTrue(spec.expressionAttributeValues().containsValue("ACTIVE"));
-		assertTrue(spec.expressionAttributeValues().containsValue("PENDING"));
-		assertTrue(spec.expressionAttributeValues().containsValue("CLOSED"));
-		assertFalse(spec.expressionAttributeValues().values().stream().anyMatch(v -> v instanceof java.util.List));
+			assertAll(() -> assertEquals(EXPECTED_IN_PLACEHOLDER_COUNT, placeholderCount),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(ROUND_ACTIVE)),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(ROUND_PENDING)),
+					() -> assertTrue(spec.expressionAttributeValues().containsValue(ROUND_CLOSED)), () -> assertFalse(
+							spec.expressionAttributeValues().values().stream().anyMatch(v -> v instanceof List)));
+		}
 	}
 }

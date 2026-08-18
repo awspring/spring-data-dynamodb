@@ -15,6 +15,12 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import io.awspring.cloud.dynamodb.LocalStackTestContainer;
 import io.awspring.cloud.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.cloud.dynamodb.core.converter.MappingDynamoDbConverter;
@@ -28,11 +34,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
@@ -49,6 +60,12 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 
 	private static final String TABLE_NAME = "orders_sk_template";
+	private static final String TOURNAMENT_ID = "cust-1";
+	private static final String TOURNAMENT_ID_2 = "cust-2";
+	private static final String DECOMPOSE_ID = "cust-decompose";
+	private static final String QUARTERFINAL = "QUARTERFINAL";
+	private static final String PENDING = "PENDING";
+	private static final String COMPOSED_SK = "MATCH#2024#QUARTERFINAL";
 
 	private DynamoDbClient dynamoDbClient;
 	private MappingDynamoDbConverter converter;
@@ -105,7 +122,7 @@ public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 		List<Match> findByTournamentIdAndYearAndRound(String tournamentId, int year, String round);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = SortKeyTemplateIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(type = org.springframework.context.annotation.FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!SortKeyTemplateIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = SortKeyTemplateIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!SortKeyTemplateIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;
@@ -125,27 +142,11 @@ public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 	void setUp() {
 		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
 				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-						.create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-								.create(localstack.getAccessKey(), localstack.getSecretKey())))
+				.credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
 				.build();
 
-		try {
-			dynamoDbClient.deleteTable(builder -> builder.tableName(TABLE_NAME));
-		}
-		catch (ResourceNotFoundException notFound) {
-		}
-
-		dynamoDbClient.createTable(CreateTableRequest.builder().tableName(TABLE_NAME)
-				.attributeDefinitions(
-						AttributeDefinition.builder().attributeName("tournamentId").attributeType(ScalarAttributeType.S)
-								.build(),
-						AttributeDefinition.builder().attributeName("sk").attributeType(ScalarAttributeType.S).build())
-				.keySchema(KeySchemaElement.builder().attributeName("tournamentId").keyType(KeyType.HASH).build(),
-						KeySchemaElement.builder().attributeName("sk").keyType(KeyType.RANGE).build())
-				.provisionedThroughput(
-						ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build())
-				.build());
+		recreateTable();
 
 		converter = new MappingDynamoDbConverter(new DynamoDbMappingContext());
 		converter.afterPropertiesSet();
@@ -164,6 +165,25 @@ public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 		}
 	}
 
+	private void recreateTable() {
+		try {
+			dynamoDbClient.deleteTable(builder -> builder.tableName(TABLE_NAME));
+		}
+		catch (ResourceNotFoundException notFound) {
+		}
+
+		dynamoDbClient.createTable(CreateTableRequest.builder().tableName(TABLE_NAME)
+				.attributeDefinitions(
+						AttributeDefinition.builder().attributeName("tournamentId").attributeType(ScalarAttributeType.S)
+								.build(),
+						AttributeDefinition.builder().attributeName("sk").attributeType(ScalarAttributeType.S).build())
+				.keySchema(KeySchemaElement.builder().attributeName("tournamentId").keyType(KeyType.HASH).build(),
+						KeySchemaElement.builder().attributeName("sk").keyType(KeyType.RANGE).build())
+				.provisionedThroughput(
+						ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build())
+				.build());
+	}
+
 	private Map<String, AttributeValue> rawGetItem(String tournamentId, String sk) {
 		Map<String, AttributeValue> key = new HashMap<>();
 		key.put("tournamentId", AttributeValue.builder().s(tournamentId).build());
@@ -172,65 +192,89 @@ public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 				.getItem(GetItemRequest.builder().tableName(TABLE_NAME).key(key).consistentRead(true).build()).item();
 	}
 
-	@Test
-	void saveWritesTheComposedSortKeyAsTheRawSkAttribute() {
-		repository.save(new Match("cust-1", 2024, "QUARTERFINAL"));
+	@Nested
+	@DisplayName("Write composition")
+	class WriteComposition {
 
-		Map<String, AttributeValue> stored = rawGetItem("cust-1", "MATCH#2024#QUARTERFINAL");
+		@Test
+		@DisplayName("save writes the composed sort key as the raw sk attribute")
+		void save_composesTemplateIntoSkAttribute() {
+			repository.save(new Match(TOURNAMENT_ID, 2024, QUARTERFINAL));
 
-		Assertions.assertFalse(stored.isEmpty(), "item must be retrievable by its composed sort key");
-		Assertions.assertNotNull(stored.get("sk"), "the @SortKeyTemplate must materialise the 'sk' attribute");
-		Assertions.assertEquals("MATCH#2024#QUARTERFINAL", stored.get("sk").s());
-		Assertions.assertEquals("2024", stored.get("year").n());
-		Assertions.assertEquals("QUARTERFINAL", stored.get("round").s());
+			Map<String, AttributeValue> stored = rawGetItem(TOURNAMENT_ID, COMPOSED_SK);
+
+			assertAll("stored item has the composed sort key and constituent properties",
+					() -> assertFalse(stored.isEmpty(), "item must be retrievable by its composed sort key"),
+					() -> assertNotNull(stored.get("sk"), "the @SortKeyTemplate must materialise the 'sk' attribute"),
+					() -> assertEquals(COMPOSED_SK, stored.get("sk").s()),
+					() -> assertEquals("2024", stored.get("year").n()),
+					() -> assertEquals(QUARTERFINAL, stored.get("round").s()));
+		}
 	}
 
-	@Test
-	void readDecomposesTheStoredSortKeyBackOntoPlaceholderProperties() {
-		Map<String, AttributeValue> raw = new HashMap<>();
-		raw.put("tournamentId", AttributeValue.builder().s("cust-decompose").build());
-		raw.put("sk", AttributeValue.builder().s("MATCH#2020#PENDING").build());
-		raw.put("year", AttributeValue.builder().n("1999").build());
-		raw.put("round", AttributeValue.builder().s("WRONG").build());
-		dynamoDbClient.putItem(PutItemRequest.builder().tableName(TABLE_NAME).item(raw).build());
+	@Nested
+	@DisplayName("Read decomposition")
+	class ReadDecomposition {
 
-		Map<String, AttributeValue> stored = rawGetItem("cust-decompose", "MATCH#2020#PENDING");
-		Match readBack = converter.read(Match.class, stored);
+		@Test
+		@DisplayName("read decomposes the stored sort key back onto placeholder properties")
+		void read_decomposesSkIntoYearAndRound() {
+			Map<String, AttributeValue> raw = new HashMap<>();
+			raw.put("tournamentId", AttributeValue.builder().s(DECOMPOSE_ID).build());
+			raw.put("sk", AttributeValue.builder().s("MATCH#2020#PENDING").build());
+			raw.put("year", AttributeValue.builder().n("1999").build());
+			raw.put("round", AttributeValue.builder().s("WRONG").build());
+			dynamoDbClient.putItem(PutItemRequest.builder().tableName(TABLE_NAME).item(raw).build());
 
-		Assertions.assertEquals("cust-decompose", readBack.getTournamentId());
-		Assertions.assertEquals(2020, readBack.getYear(), "year must be reconstructed from the composed sort key");
-		Assertions.assertEquals("PENDING", readBack.getRound(),
-				"round must be reconstructed from the composed sort key");
+			Map<String, AttributeValue> stored = rawGetItem(DECOMPOSE_ID, "MATCH#2020#PENDING");
+			Match readBack = converter.read(Match.class, stored);
+
+			assertAll("properties are reconstructed from the composed sort key, not the raw attributes",
+					() -> assertEquals(DECOMPOSE_ID, readBack.getTournamentId()),
+					() -> assertEquals(2020, readBack.getYear(),
+							"year must be reconstructed from the composed sort key"),
+					() -> assertEquals(PENDING, readBack.getRound(),
+							"round must be reconstructed from the composed sort key"));
+		}
 	}
 
-	@Test
-	void derivedBeginsWithFinderReturnsOnlyTheMatchingYearForThatCustomer() {
-		repository.save(new Match("cust-1", 2022, "NEW"));
-		repository.save(new Match("cust-1", 2023, "QUARTERFINAL"));
-		repository.save(new Match("cust-1", 2023, "PENDING"));
-		repository.save(new Match("cust-1", 2024, "QUARTERFINAL"));
-		repository.save(new Match("cust-2", 2023, "QUARTERFINAL"));
+	@Nested
+	@DisplayName("Derived queries")
+	class DerivedQueries {
 
-		List<Match> found = repository.findByTournamentIdAndYear("cust-1", 2023);
+		@Test
+		@DisplayName("begins_with finder returns only matching year for that customer")
+		void findByTournamentIdAndYear_partialTemplate_usesBeginsWith() {
+			repository.save(new Match(TOURNAMENT_ID, 2022, "NEW"));
+			repository.save(new Match(TOURNAMENT_ID, 2023, QUARTERFINAL));
+			repository.save(new Match(TOURNAMENT_ID, 2023, PENDING));
+			repository.save(new Match(TOURNAMENT_ID, 2024, QUARTERFINAL));
+			repository.save(new Match(TOURNAMENT_ID_2, 2023, QUARTERFINAL));
 
-		Assertions.assertEquals(2, found.size(),
-				"begins_with(sk, \"MATCH#2023#\") must return exactly cust-1's two 2023 orders");
-		Assertions.assertTrue(found.stream().allMatch(o -> "cust-1".equals(o.getTournamentId())),
-				"partition-key condition must exclude the other customer");
-		Assertions.assertTrue(found.stream().allMatch(o -> o.getYear() == 2023),
-				"begins_with prefix must exclude the 2022 and 2024 orders");
-	}
+			List<Match> found = repository.findByTournamentIdAndYear(TOURNAMENT_ID, 2023);
 
-	@Test
-	void derivedFullyBoundFinderMatchesExactlyTheComposedSortKey() {
-		repository.save(new Match("cust-1", 2023, "QUARTERFINAL"));
-		repository.save(new Match("cust-1", 2023, "PENDING"));
+			assertAll("begins_with on year prefix",
+					() -> assertEquals(2, found.size(),
+							"begins_with(sk, \"MATCH#2023#\") must return exactly cust-1's two 2023 orders"),
+					() -> assertTrue(found.stream().allMatch(o -> TOURNAMENT_ID.equals(o.getTournamentId())),
+							"partition-key condition must exclude the other customer"),
+					() -> assertTrue(found.stream().allMatch(o -> o.getYear() == 2023),
+							"begins_with prefix must exclude the 2022 and 2024 orders"));
+		}
 
-		List<Match> found = repository.findByTournamentIdAndYearAndRound("cust-1", 2023, "PENDING");
+		@Test
+		@DisplayName("fully-bound finder matches exactly the composed sort key")
+		void findByTournamentIdAndYearAndRound_fullTemplate_matchesExactly() {
+			repository.save(new Match(TOURNAMENT_ID, 2023, QUARTERFINAL));
+			repository.save(new Match(TOURNAMENT_ID, 2023, PENDING));
 
-		Assertions.assertEquals(1, found.size(),
-				"EQ on the fully-composed \"MATCH#2023#PENDING\" must match exactly one match");
-		Assertions.assertEquals(2023, found.get(0).getYear());
-		Assertions.assertEquals("PENDING", found.get(0).getRound());
+			List<Match> found = repository.findByTournamentIdAndYearAndRound(TOURNAMENT_ID, 2023, PENDING);
+
+			assertAll("exact match on fully composed sort key",
+					() -> assertEquals(1, found.size(),
+							"EQ on the fully-composed \"MATCH#2023#PENDING\" must match exactly one match"),
+					() -> assertEquals(2023, found.get(0).getYear()),
+					() -> assertEquals(PENDING, found.get(0).getRound()));
+		}
 	}
 }

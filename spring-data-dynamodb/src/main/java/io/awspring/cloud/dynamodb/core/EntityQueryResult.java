@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.core;
 
 import java.util.Map;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class EntityQueryResult<T> {
 
 	private final T entity;

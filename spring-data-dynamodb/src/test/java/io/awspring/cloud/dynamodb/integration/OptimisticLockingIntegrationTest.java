@@ -15,8 +15,12 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.cloud.dynamodb.LocalStackTestContainer;
 import io.awspring.cloud.dynamodb.config.AbstractDynamoDbConfiguration;
@@ -25,18 +29,32 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.annotation.Version;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.*;
+import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
+import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
+import software.amazon.awssdk.services.dynamodb.model.KeyType;
+import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
+import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 public class OptimisticLockingIntegrationTest extends LocalStackTestContainer {
 
 	private static final String TABLE_NAME = "optimistic_locking_test";
+	private static final String INITIAL_DATA = "initial data";
+	private static final String UPDATED_DATA = "updated data";
+	private static final String FRESH_UPDATE = "fresh update";
+	private static final String STALE_UPDATE = "stale update";
 
 	private AnnotationConfigApplicationContext context;
 	private DynamoDbTemplate template;
@@ -103,9 +121,8 @@ public class OptimisticLockingIntegrationTest extends LocalStackTestContainer {
 	void setUp() {
 		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
 				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-						.create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-								.create(localstack.getAccessKey(), localstack.getSecretKey())))
+				.credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
 				.build();
 
 		recreateTable();
@@ -141,115 +158,141 @@ public class OptimisticLockingIntegrationTest extends LocalStackTestContainer {
 				.build());
 	}
 
-	@Test
-	void newEntityGetsVersionZero() {
-		VersionedEntity entity = new VersionedEntity("test-1", "initial data");
-		assertThat(entity.getVersion()).isNull();
-
+	private VersionedEntity saveAndReturn(String id, String data) {
+		VersionedEntity entity = new VersionedEntity(id, data);
 		template.save(entity);
-
-		assertThat(entity.getVersion()).isEqualTo(0L);
-
-		VersionedEntity fetched = template.findById("test-1", VersionedEntity.class);
-		assertThat(fetched).isNotNull();
-		assertThat(fetched.getVersion()).isEqualTo(0L);
-		assertThat(fetched.getData()).isEqualTo("initial data");
+		return entity;
 	}
 
-	@Test
-	void saveIncrementsVersion() {
-		VersionedEntity entity = new VersionedEntity("test-2", "initial data");
-		template.save(entity);
-		assertThat(entity.getVersion()).isEqualTo(0L);
+	@Nested
+	@DisplayName("Version assignment")
+	class VersionAssignment {
 
-		entity.setData("updated data");
-		template.save(entity);
+		@Test
+		@DisplayName("a new entity receives version 0 on first save")
+		void newEntity_firstSave_receivesVersionZero() {
+			VersionedEntity entity = new VersionedEntity("test-1", INITIAL_DATA);
+			assertNull(entity.getVersion());
 
-		assertThat(entity.getVersion()).isEqualTo(1L);
+			template.save(entity);
 
-		VersionedEntity fetched = template.findById("test-2", VersionedEntity.class);
-		assertThat(fetched.getVersion()).isEqualTo(1L);
-		assertThat(fetched.getData()).isEqualTo("updated data");
+			VersionedEntity fetched = template.findById("test-1", VersionedEntity.class);
+			assertAll("version and data after first save", () -> assertEquals(0L, entity.getVersion()),
+					() -> assertNotNull(fetched), () -> assertEquals(0L, fetched.getVersion()),
+					() -> assertEquals(INITIAL_DATA, fetched.getData()));
+		}
+
+		@Test
+		@DisplayName("multiple sequential updates increment the version monotonically")
+		void multipleUpdates_incrementVersionSequentially() {
+			VersionedEntity entity = saveAndReturn("test-6", "v0");
+			assertEquals(0L, entity.getVersion());
+
+			entity.setData("v1");
+			template.update(entity);
+			assertEquals(1L, entity.getVersion());
+
+			entity.setData("v2");
+			template.update(entity);
+			assertEquals(2L, entity.getVersion());
+
+			entity.setData("v3");
+			template.update(entity);
+			assertEquals(3L, entity.getVersion());
+
+			VersionedEntity fetched = template.findById("test-6", VersionedEntity.class);
+			assertAll("final state after three updates", () -> assertEquals(3L, fetched.getVersion()),
+					() -> assertEquals("v3", fetched.getData()));
+		}
 	}
 
-	@Test
-	void updateIncrementsVersion() {
-		VersionedEntity entity = new VersionedEntity("test-3", "initial data");
-		template.save(entity);
-		assertThat(entity.getVersion()).isEqualTo(0L);
+	@Nested
+	@DisplayName("Save versioning")
+	class SaveVersioning {
 
-		entity.setData("updated via update");
-		template.update(entity);
+		@Test
+		@DisplayName("save increments the version from 0 to 1")
+		void save_afterInitialSave_incrementsVersion() {
+			VersionedEntity entity = saveAndReturn("test-2", INITIAL_DATA);
+			assertEquals(0L, entity.getVersion());
 
-		assertThat(entity.getVersion()).isEqualTo(1L);
+			entity.setData(UPDATED_DATA);
+			template.save(entity);
 
-		VersionedEntity fetched = template.findById("test-3", VersionedEntity.class);
-		assertThat(fetched.getVersion()).isEqualTo(1L);
-		assertThat(fetched.getData()).isEqualTo("updated via update");
+			VersionedEntity fetched = template.findById("test-2", VersionedEntity.class);
+			assertAll("version and data after second save", () -> assertEquals(1L, entity.getVersion()),
+					() -> assertEquals(1L, fetched.getVersion()), () -> assertEquals(UPDATED_DATA, fetched.getData()));
+		}
 	}
 
-	@Test
-	void concurrentSaveIsRejected() {
-		VersionedEntity entity = new VersionedEntity("test-4", "initial data");
-		template.save(entity);
-		assertThat(entity.getVersion()).isEqualTo(0L);
+	@Nested
+	@DisplayName("Update versioning")
+	class UpdateVersioning {
 
-		VersionedEntity staleEntity = template.findById("test-4", VersionedEntity.class);
-		assertThat(staleEntity.getVersion()).isEqualTo(0L);
+		@Test
+		@DisplayName("update increments the version from 0 to 1")
+		void update_afterInitialSave_incrementsVersion() {
+			VersionedEntity entity = saveAndReturn("test-3", INITIAL_DATA);
+			assertEquals(0L, entity.getVersion());
 
-		entity.setData("fresh update");
-		template.save(entity);
-		assertThat(entity.getVersion()).isEqualTo(1L);
+			entity.setData("updated via update");
+			template.update(entity);
 
-		staleEntity.setData("stale update");
-		assertThatThrownBy(() -> template.save(staleEntity)).isInstanceOf(OptimisticLockingFailureException.class)
-				.hasMessageContaining("Version mismatch");
-
-		VersionedEntity fetched = template.findById("test-4", VersionedEntity.class);
-		assertThat(fetched.getData()).isEqualTo("fresh update");
-		assertThat(fetched.getVersion()).isEqualTo(1L);
+			VersionedEntity fetched = template.findById("test-3", VersionedEntity.class);
+			assertAll("version and data after update", () -> assertEquals(1L, entity.getVersion()),
+					() -> assertEquals(1L, fetched.getVersion()),
+					() -> assertEquals("updated via update", fetched.getData()));
+		}
 	}
 
-	@Test
-	void concurrentUpdateIsRejected() {
-		VersionedEntity entity = new VersionedEntity("test-5", "initial data");
-		template.save(entity);
+	@Nested
+	@DisplayName("Conflict detection")
+	class ConflictDetection {
 
-		VersionedEntity staleEntity = template.findById("test-5", VersionedEntity.class);
+		@Test
+		@DisplayName("a save with a stale version is rejected with OptimisticLockingFailureException")
+		void save_withStaleVersion_isRejected() {
+			VersionedEntity entity = saveAndReturn("test-4", INITIAL_DATA);
+			assertEquals(0L, entity.getVersion());
 
-		entity.setData("fresh update");
-		template.update(entity);
-		assertThat(entity.getVersion()).isEqualTo(1L);
+			VersionedEntity staleEntity = template.findById("test-4", VersionedEntity.class);
+			assertEquals(0L, staleEntity.getVersion());
 
-		staleEntity.setData("stale update");
-		assertThatThrownBy(() -> template.update(staleEntity)).isInstanceOf(OptimisticLockingFailureException.class)
-				.hasMessageContaining("Version mismatch");
+			entity.setData(FRESH_UPDATE);
+			template.save(entity);
+			assertEquals(1L, entity.getVersion());
 
-		VersionedEntity fetched = template.findById("test-5", VersionedEntity.class);
-		assertThat(fetched.getData()).isEqualTo("fresh update");
-		assertThat(fetched.getVersion()).isEqualTo(1L);
-	}
+			staleEntity.setData(STALE_UPDATE);
+			OptimisticLockingFailureException ex = assertThrows(OptimisticLockingFailureException.class,
+					() -> template.save(staleEntity));
+			assertTrue(ex.getMessage().contains("Version mismatch"),
+					"exception message should indicate version mismatch");
 
-	@Test
-	void multipleUpdatesIncrementVersionSequentially() {
-		VersionedEntity entity = new VersionedEntity("test-6", "v0");
-		template.save(entity);
-		assertThat(entity.getVersion()).isEqualTo(0L);
+			VersionedEntity fetched = template.findById("test-4", VersionedEntity.class);
+			assertAll("the fresh update must win", () -> assertEquals(FRESH_UPDATE, fetched.getData()),
+					() -> assertEquals(1L, fetched.getVersion()));
+		}
 
-		entity.setData("v1");
-		template.update(entity);
-		assertThat(entity.getVersion()).isEqualTo(1L);
+		@Test
+		@DisplayName("an update with a stale version is rejected with OptimisticLockingFailureException")
+		void update_withStaleVersion_isRejected() {
+			VersionedEntity entity = saveAndReturn("test-5", INITIAL_DATA);
 
-		entity.setData("v2");
-		template.update(entity);
-		assertThat(entity.getVersion()).isEqualTo(2L);
+			VersionedEntity staleEntity = template.findById("test-5", VersionedEntity.class);
 
-		entity.setData("v3");
-		template.update(entity);
-		assertThat(entity.getVersion()).isEqualTo(3L);
+			entity.setData(FRESH_UPDATE);
+			template.update(entity);
+			assertEquals(1L, entity.getVersion());
 
-		VersionedEntity fetched = template.findById("test-6", VersionedEntity.class);
-		assertThat(fetched.getVersion()).isEqualTo(3L);
-		assertThat(fetched.getData()).isEqualTo("v3");
+			staleEntity.setData(STALE_UPDATE);
+			OptimisticLockingFailureException ex = assertThrows(OptimisticLockingFailureException.class,
+					() -> template.update(staleEntity));
+			assertTrue(ex.getMessage().contains("Version mismatch"),
+					"exception message should indicate version mismatch");
+
+			VersionedEntity fetched = template.findById("test-5", VersionedEntity.class);
+			assertAll("the fresh update must win", () -> assertEquals(FRESH_UPDATE, fetched.getData()),
+					() -> assertEquals(1L, fetched.getVersion()));
+		}
 	}
 }

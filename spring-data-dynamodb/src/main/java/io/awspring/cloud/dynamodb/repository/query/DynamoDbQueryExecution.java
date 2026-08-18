@@ -23,6 +23,10 @@ import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbQueryExecution {
 
 	@Nullable
@@ -59,6 +63,18 @@ public interface DynamoDbQueryExecution {
 			ScrollPosition nextPosition = hasNext
 					? ScrollPosition.forward(lastEvaluatedKey)
 					: ScrollPosition.keyset();
-			return Window.from(result.getEntity(), index -> nextPosition, hasNext);
+
+			List<Object> items = result.getEntity();
+			int lastIndex = items.size() - 1;
+
+			return Window.from(items, index -> {
+				if (index != lastIndex) {
+					throw new IllegalStateException("DynamoDB pages by LastEvaluatedKey, which identifies the end of "
+							+ "the current page, so a ScrollPosition is only available for the last element (index "
+							+ lastIndex + "); index " + index + " was requested. Use "
+							+ "positionAt(window.size() - 1) to continue after this page.");
+				}
+				return nextPosition;
+			}, hasNext);
 		}
 }}

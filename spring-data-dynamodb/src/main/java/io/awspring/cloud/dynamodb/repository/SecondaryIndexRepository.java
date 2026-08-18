@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.repository;
 import org.springframework.data.repository.NoRepositoryBean;
 import org.springframework.data.repository.Repository;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @NoRepositoryBean
 public interface SecondaryIndexRepository<T> extends Repository<T, Void> {
 }

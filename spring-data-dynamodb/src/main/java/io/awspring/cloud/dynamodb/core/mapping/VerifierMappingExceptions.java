@@ -22,6 +22,10 @@ import java.util.stream.Collectors;
 import org.springframework.data.mapping.MappingException;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @SuppressWarnings("serial")
 public class VerifierMappingExceptions extends MappingException {
 

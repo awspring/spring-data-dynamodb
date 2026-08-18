@@ -15,7 +15,11 @@
  */
 package io.awspring.cloud.dynamodb.core.mapping.events;
 
-public class DynamoDbBeforeDeleteEvent<T> extends DynamoDbMappingEvent {
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+public class DynamoDbBeforeDeleteEvent<T> extends DynamoDbMappingEvent<T> {
 	public DynamoDbBeforeDeleteEvent(T source, String tableName) {
 		super(source, tableName);
 	}

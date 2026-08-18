@@ -18,37 +18,17 @@ package io.awspring.cloud.dynamodb.core.mapping;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-public final class IndexKeySchema {
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+public record IndexKeySchema(List<DynamoDbPersistentProperty> partitionKeys,
+							 List<DynamoDbPersistentProperty> sortKeys) {
 
-	private final String indexName;
-	private final List<DynamoDbPersistentProperty> partitionKeys;
-	private final List<DynamoDbPersistentProperty> sortKeys;
-
-	public IndexKeySchema(String indexName, List<DynamoDbPersistentProperty> partitionKeys,
-			List<DynamoDbPersistentProperty> sortKeys) {
-		this.indexName = indexName;
+	public IndexKeySchema(List<DynamoDbPersistentProperty> partitionKeys,
+						  List<DynamoDbPersistentProperty> sortKeys) {
 		this.partitionKeys = List.copyOf(partitionKeys);
 		this.sortKeys = List.copyOf(sortKeys);
-	}
-
-	public static IndexKeySchema empty(String indexName) {
-		return new IndexKeySchema(indexName, List.of(), List.of());
-	}
-
-	public String indexName() {
-		return indexName;
-	}
-
-	public List<DynamoDbPersistentProperty> partitionKeys() {
-		return partitionKeys;
-	}
-
-	public List<DynamoDbPersistentProperty> sortKeys() {
-		return sortKeys;
-	}
-
-	public boolean isBaseTable() {
-		return indexName.isEmpty();
 	}
 
 	public boolean isEmpty() {

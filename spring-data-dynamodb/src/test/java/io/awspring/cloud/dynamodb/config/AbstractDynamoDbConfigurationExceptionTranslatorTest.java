@@ -15,48 +15,82 @@
  */
 package io.awspring.cloud.dynamodb.config;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 
 import io.awspring.cloud.dynamodb.core.DefaultDynamoDbExceptionTranslator;
 import io.awspring.cloud.dynamodb.core.DynamoDbExceptionTranslator;
 import io.awspring.cloud.dynamodb.core.DynamoDbTemplate;
 import io.awspring.cloud.dynamodb.core.converter.DynamoDbConverter;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.dao.DataAccessException;
 import org.springframework.lang.Nullable;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
+@DisplayName("AbstractDynamoDbConfiguration — exception translator wiring")
 class AbstractDynamoDbConfigurationExceptionTranslatorTest {
 
-	@Test
-	void defaultConfigurationUsesDefaultExceptionTranslator() {
+	private static final String TRANSLATE_TASK = "test-task";
 
-		TestConfiguration configuration = new TestConfiguration();
+	@Nested
+	@DisplayName("Default configuration")
+	class DefaultConfiguration {
 
-		DynamoDbExceptionTranslator translator = configuration.dynamoDbExceptionTranslator();
-		DynamoDbTemplate template = configuration.dynamoDbTemplate(mock(DynamoDbClient.class),
-				Mockito.mock(DynamoDbConverter.class), translator);
+		private final TestConfiguration configuration = new TestConfiguration();
 
-		assertThat(translator).isInstanceOf(DefaultDynamoDbExceptionTranslator.class);
-		assertThat(template.getExceptionTranslator()).isSameAs(translator);
+		@Test
+		@DisplayName("uses DefaultDynamoDbExceptionTranslator and wires it into the template")
+		void dynamoDbExceptionTranslator_default_defaultInstanceWiredIntoTemplate() {
+
+			// Arrange
+			DynamoDbExceptionTranslator translator = configuration.dynamoDbExceptionTranslator();
+			DynamoDbTemplate template = configuration.dynamoDbTemplate(mock(DynamoDbClient.class),
+					mock(DynamoDbConverter.class), translator);
+
+			// Assert
+			assertAll(
+					() -> assertInstanceOf(DefaultDynamoDbExceptionTranslator.class, translator,
+							"default translator should be DefaultDynamoDbExceptionTranslator"),
+					() -> assertSame(translator, template.getExceptionTranslator(),
+							"template should use the exact translator instance"));
+		}
 	}
 
-	@Test
-	void subclassCanOverrideExceptionTranslator() {
+	@Nested
+	@DisplayName("Subclass with custom translator")
+	class CustomTranslatorOverride {
 
-		RuntimeException marker = new RuntimeException("boom");
-		DynamoDbExceptionTranslator custom = ex -> new CustomTranslatedException(ex);
+		@Test
+		@DisplayName("template uses the overridden translator and it translates correctly")
+		void dynamoDbExceptionTranslator_customOverride_usedByTemplateAndTranslatesCorrectly() {
 
-		CustomTranslatorConfiguration configuration = new CustomTranslatorConfiguration(custom);
-		DynamoDbTemplate template = configuration.dynamoDbTemplate(mock(DynamoDbClient.class),
-				mock(DynamoDbConverter.class), configuration.dynamoDbExceptionTranslator());
+			// Arrange
+			RuntimeException marker = new RuntimeException("boom");
+			DynamoDbExceptionTranslator custom = ex -> new CustomTranslatedException(ex);
+			CustomTranslatorConfiguration configuration = new CustomTranslatorConfiguration(custom);
 
-		assertThat(template.getExceptionTranslator()).isSameAs(custom);
-		assertThat(template.getExceptionTranslator().translate("task", null, marker))
-				.isInstanceOf(CustomTranslatedException.class).hasCause(marker);
+			// Act
+			DynamoDbTemplate template = configuration.dynamoDbTemplate(mock(DynamoDbClient.class),
+					mock(DynamoDbConverter.class), configuration.dynamoDbExceptionTranslator());
+
+			// Assert
+			DataAccessException translated = template.getExceptionTranslator().translate(TRANSLATE_TASK, null, marker);
+
+			assertAll(
+					() -> assertSame(custom, template.getExceptionTranslator(),
+							"template should use the custom translator instance"),
+					() -> assertInstanceOf(CustomTranslatedException.class, translated,
+							"translated exception should be CustomTranslatedException"),
+					() -> assertSame(marker, translated.getCause(),
+							"translated exception should wrap the original cause"));
+		}
 	}
+
+	// --- Test fixtures ---
 
 	static class TestConfiguration extends AbstractDynamoDbConfiguration {
 	}

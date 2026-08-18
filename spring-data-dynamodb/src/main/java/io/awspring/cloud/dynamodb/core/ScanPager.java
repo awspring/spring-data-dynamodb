@@ -20,8 +20,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
-import java.util.function.Predicate;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 final class ScanPager<T> {
 
 	private final Class<T> entityClass;
@@ -31,37 +34,6 @@ final class ScanPager<T> {
 			BiFunction<Class<T>, DynamoDbScanRequest, EntityQueryResult<List<T>>> scanFunction) {
 		this.entityClass = entityClass;
 		this.scanFunction = scanFunction;
-	}
-
-	long countAll(DynamoDbScanRequest baseRequest) {
-		long total = 0L;
-		Map<String, Object> exclusiveStartKey = baseRequest.getExclusiveStartKey();
-
-		do {
-			DynamoDbScanRequest page = withExclusiveStartKey(baseRequest, exclusiveStartKey);
-			EntityQueryResult<List<T>> result = scanFunction.apply(entityClass, page);
-			total += result.getCount() != null ? result.getCount() : result.getEntity().size();
-			exclusiveStartKey = result.getLastEvaluatedKey();
-		}
-		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
-
-		return total;
-	}
-
-	boolean exists(DynamoDbScanRequest baseRequest, Predicate<List<T>> matchFound) {
-		Map<String, Object> exclusiveStartKey = baseRequest.getExclusiveStartKey();
-
-		do {
-			DynamoDbScanRequest page = withExclusiveStartKey(baseRequest, exclusiveStartKey);
-			EntityQueryResult<List<T>> result = scanFunction.apply(entityClass, page);
-			if (matchFound.test(result.getEntity())) {
-				return true;
-			}
-			exclusiveStartKey = result.getLastEvaluatedKey();
-		}
-		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
-
-		return false;
 	}
 
 	List<T> collectAll(DynamoDbScanRequest baseRequest) {

@@ -15,10 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import io.awspring.cloud.dynamodb.core.converter.MappingDynamoDbConverter;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
@@ -32,12 +29,16 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class TournamentDomainConverterTest {
+class TournamentDomainConverterTest {
+
+	private static final String TOURNAMENT_ID = "winter2026";
 
 	@Table(tableName = "scheduled_match")
 	public static class ScheduledMatch {
@@ -48,7 +49,7 @@ public class TournamentDomainConverterTest {
 		private MatchStatus status;
 		private LocalDate scheduledAt;
 		private int bestOf;
-		@InnerClass(serializeAsJson = true)
+		@InnerClass(serializeAsNestedMap = true)
 		private Venue venue;
 
 		public ScheduledMatch() {
@@ -126,82 +127,104 @@ public class TournamentDomainConverterTest {
 		return match;
 	}
 
-	@Test
-	void aFullyPopulatedMatchWritesAllKeyAndScalarColumnsAndRoundTrips() {
-		LocalDate day = LocalDate.of(2026, 3, 14);
-		Venue venue = new Venue("Spodek", 11000L, "Katowice", "PL");
-		ScheduledMatch match = new ScheduledMatch("winter2026", "m-1", MatchStatus.LIVE, day, 5, venue);
+	@Nested
+	@DisplayName("Full round-trip")
+	class FullRoundTrip {
 
-		Map<String, AttributeValue> item = new HashMap<>();
-		write(match, item);
+		@Test
+		@DisplayName("Fully populated match writes all columns and round-trips")
+		void fullyPopulatedMatch_writesAllColumns_roundTrips() {
+			LocalDate day = LocalDate.of(2026, 3, 14);
+			Venue venue = new Venue("Spodek", 11000L, "Katowice", "PL");
+			ScheduledMatch match = new ScheduledMatch(TOURNAMENT_ID, "m-1", MatchStatus.LIVE, day, 5, venue);
 
-		assertEquals("winter2026", item.get("tournamentId").s());
-		assertEquals("m-1", item.get("matchId").s());
-		assertEquals("5", item.get("bestOf").n());
-		assertTrue(item.containsKey("status"));
-		assertTrue(item.containsKey("scheduledAt"));
-		assertTrue(item.containsKey("venue"));
+			Map<String, AttributeValue> item = new HashMap<>();
+			write(match, item);
 
-		ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
-		assertEquals("winter2026", readBack.getTournamentId());
-		assertEquals("m-1", readBack.getMatchId());
-		assertEquals(MatchStatus.LIVE, readBack.getStatus());
-		assertEquals(day, readBack.getScheduledAt());
-		assertEquals(5, readBack.getBestOf());
-		assertEquals(venue, readBack.getVenue());
+			assertAll("written item columns", () -> assertEquals(TOURNAMENT_ID, item.get("tournamentId").s()),
+					() -> assertEquals("m-1", item.get("matchId").s()), () -> assertEquals("5", item.get("bestOf").n()),
+					() -> assertTrue(item.containsKey("status")), () -> assertTrue(item.containsKey("scheduledAt")),
+					() -> assertTrue(item.containsKey("venue")));
+
+			ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
+
+			assertAll("read-back values", () -> assertEquals(TOURNAMENT_ID, readBack.getTournamentId()),
+					() -> assertEquals("m-1", readBack.getMatchId()),
+					() -> assertEquals(MatchStatus.LIVE, readBack.getStatus()),
+					() -> assertEquals(day, readBack.getScheduledAt()), () -> assertEquals(5, readBack.getBestOf()),
+					() -> assertEquals(venue, readBack.getVenue()));
+		}
+
+		@ParameterizedTest
+		@EnumSource(MatchStatus.class)
+		@DisplayName("Every MatchStatus round-trips through the converter")
+		void everyMatchStatus_roundTrips(MatchStatus status) {
+			ScheduledMatch match = new ScheduledMatch(TOURNAMENT_ID, "m-status", status, LocalDate.of(2026, 1, 1), 3,
+					null);
+
+			Map<String, AttributeValue> item = new HashMap<>();
+			write(match, item);
+
+			ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
+
+			assertEquals(status, readBack.getStatus());
+		}
 	}
 
-	@ParameterizedTest
-	@EnumSource(MatchStatus.class)
-	void everyMatchStatusRoundTripsThroughTheConverter(MatchStatus status) {
-		ScheduledMatch match = new ScheduledMatch("winter2026", "m-status", status, LocalDate.of(2026, 1, 1), 3, null);
+	@Nested
+	@DisplayName("Null handling")
+	class NullHandling {
 
-		Map<String, AttributeValue> item = new HashMap<>();
-		write(match, item);
+		@Test
+		@DisplayName("Null venue omits the column and reads back as null")
+		void nullVenue_omitsColumn_readsBackNull() {
+			ScheduledMatch match = new ScheduledMatch(TOURNAMENT_ID, "m-2", MatchStatus.SCHEDULED,
+					LocalDate.of(2026, 2, 2), 1, null);
 
-		ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
-		assertEquals(status, readBack.getStatus());
+			Map<String, AttributeValue> item = new HashMap<>();
+			write(match, item);
+
+			assertFalse(item.containsKey("venue") && item.get("venue").s() != null && !item.get("venue").s().isEmpty()
+					&& !"null".equals(item.get("venue").s()));
+
+			ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
+
+			assertNull(readBack.getVenue());
+		}
+
+		@Test
+		@DisplayName("Null status is not materialised and reads back as null")
+		void nullStatus_notMaterialised_readsBackNull() {
+			ScheduledMatch match = new ScheduledMatch(TOURNAMENT_ID, "m-3", null, LocalDate.of(2026, 4, 4), 3,
+					new Venue("Arena", 5000L, "Berlin", "DE"));
+
+			Map<String, AttributeValue> item = new HashMap<>();
+			write(match, item);
+
+			AttributeValue status = item.get("status");
+			assertTrue(status == null || Boolean.TRUE.equals(status.nul()));
+
+			ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
+
+			assertAll("null status read-back", () -> assertNull(readBack.getStatus()),
+					() -> assertEquals(match.getVenue(), readBack.getVenue()));
+		}
 	}
 
-	@Test
-	void aMatchWithNoVenueOmitsTheJsonColumnAndReadsBackAsNull() {
-		ScheduledMatch match = new ScheduledMatch("winter2026", "m-2", MatchStatus.SCHEDULED, LocalDate.of(2026, 2, 2),
-				1, null);
+	@Nested
+	@DisplayName("Enum storage")
+	class EnumStorage {
 
-		Map<String, AttributeValue> item = new HashMap<>();
-		write(match, item);
+		@Test
+		@DisplayName("Status column stores the enum constant name as a string")
+		void statusColumn_storesEnumName_asString() {
+			ScheduledMatch match = new ScheduledMatch(TOURNAMENT_ID, "m-4", MatchStatus.COMPLETED,
+					LocalDate.of(2026, 5, 5), 3, null);
 
-		assertFalse(item.containsKey("venue") && item.get("venue").s() != null && !item.get("venue").s().isEmpty()
-				&& !"null".equals(item.get("venue").s()));
+			Map<String, AttributeValue> item = new HashMap<>();
+			write(match, item);
 
-		ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
-		assertNull(readBack.getVenue());
-	}
-
-	@Test
-	void aNullStatusIsNotMaterialisedAndReadsBackAsNull() {
-		ScheduledMatch match = new ScheduledMatch("winter2026", "m-3", null, LocalDate.of(2026, 4, 4), 3,
-				new Venue("Arena", 5000L, "Berlin", "DE"));
-
-		Map<String, AttributeValue> item = new HashMap<>();
-		write(match, item);
-
-		AttributeValue status = item.get("status");
-		assertTrue(status == null || Boolean.TRUE.equals(status.nul()));
-
-		ScheduledMatch readBack = converter.read(ScheduledMatch.class, item);
-		assertNull(readBack.getStatus());
-		assertEquals(match.getVenue(), readBack.getVenue());
-	}
-
-	@Test
-	void theStatusColumnIsStoredAsAStringHoldingTheEnumConstantName() {
-		ScheduledMatch match = new ScheduledMatch("winter2026", "m-4", MatchStatus.COMPLETED, LocalDate.of(2026, 5, 5),
-				3, null);
-
-		Map<String, AttributeValue> item = new HashMap<>();
-		write(match, item);
-
-		assertEquals(MatchStatus.COMPLETED.name(), item.get("status").s());
+			assertEquals(MatchStatus.COMPLETED.name(), item.get("status").s());
+		}
 	}
 }

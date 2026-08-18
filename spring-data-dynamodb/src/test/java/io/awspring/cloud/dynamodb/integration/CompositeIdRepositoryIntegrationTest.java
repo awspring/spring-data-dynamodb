@@ -15,6 +15,11 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import io.awspring.cloud.dynamodb.LocalStackTestContainer;
 import io.awspring.cloud.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
@@ -25,11 +30,16 @@ import io.awspring.cloud.dynamodb.repository.DynamoDbRepository;
 import io.awspring.cloud.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
@@ -44,6 +54,11 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 
 	private static final String SCALAR_TABLE = "composite_it_scalar";
 	private static final String COMPOSITE_TABLE = "composite_it_composite";
+	private static final String SCALAR_ID = "scalar-1";
+	private static final String SCALAR_PAYLOAD = "hello";
+	private static final String COMPOSITE_PK = "cust-1";
+	private static final String MATCH_SK_1 = "MATCH#1";
+	private static final String MATCH_SK_2 = "MATCH#2";
 
 	private AnnotationConfigApplicationContext context;
 	private ScalarEntityRepository scalarRepository;
@@ -133,7 +148,7 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 	public interface CompositeEntityRepository extends DynamoDbRepository<CompositeEntity, DynamoDbCompositeId> {
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = CompositeIdRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(type = org.springframework.context.annotation.FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!CompositeIdRepositoryIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = CompositeIdRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!CompositeIdRepositoryIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;
@@ -153,9 +168,8 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 	void setUp() {
 		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
 				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-						.create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-								.create(localstack.getAccessKey(), localstack.getSecretKey())))
+				.credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
 				.build();
 
 		recreateScalarTable(dynamoDbClient);
@@ -208,69 +222,90 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 				.build());
 	}
 
-	@Test
-	void scalarFindByIdReturnsTheEntityForAPlainPartitionKey() {
-		scalarRepository.save(new ScalarEntity("scalar-1", "hello"));
+	@Nested
+	@DisplayName("Scalar key operations (partition-key only)")
+	class ScalarKeyOperations {
 
-		Optional<ScalarEntity> found = scalarRepository.findById("scalar-1");
+		@Test
+		@DisplayName("findById returns the entity for a plain partition key")
+		void findById_existingEntity_returnsIt() {
+			scalarRepository.save(new ScalarEntity(SCALAR_ID, SCALAR_PAYLOAD));
 
-		Assertions.assertTrue(found.isPresent(), "findById(scalar) must resolve a partition-key-only entity");
-		Assertions.assertEquals("scalar-1", found.get().getId());
-		Assertions.assertEquals("hello", found.get().getPayload());
+			Optional<ScalarEntity> found = scalarRepository.findById(SCALAR_ID);
+
+			assertTrue(found.isPresent(), "findById(scalar) must resolve a partition-key-only entity");
+			assertAll("returned entity matches", () -> assertEquals(SCALAR_ID, found.get().getId()),
+					() -> assertEquals(SCALAR_PAYLOAD, found.get().getPayload()));
+		}
+
+		@Test
+		@DisplayName("existsById reflects presence for a plain partition key")
+		void existsById_presentAndAbsent_correctBooleans() {
+			scalarRepository.save(new ScalarEntity("scalar-exists", "x"));
+
+			assertAll("existence checks for scalar key", () -> assertTrue(scalarRepository.existsById("scalar-exists")),
+					() -> assertFalse(scalarRepository.existsById("scalar-absent")));
+		}
+
+		@Test
+		@DisplayName("deleteById removes the entity for a plain partition key")
+		void deleteById_existingEntity_removesIt() {
+			scalarRepository.save(new ScalarEntity("scalar-delete", "x"));
+			assertTrue(scalarRepository.existsById("scalar-delete"));
+
+			scalarRepository.deleteById("scalar-delete");
+
+			assertFalse(scalarRepository.existsById("scalar-delete"),
+					"deleteById(scalar) must remove a partition-key-only entity");
+		}
 	}
 
-	@Test
-	void scalarExistsByIdReflectsPresenceForAPlainPartitionKey() {
-		scalarRepository.save(new ScalarEntity("scalar-exists", "x"));
+	@Nested
+	@DisplayName("Composite key operations (partition + sort key)")
+	class CompositeKeyOperations {
 
-		Assertions.assertTrue(scalarRepository.existsById("scalar-exists"));
-		Assertions.assertFalse(scalarRepository.existsById("scalar-absent"));
-	}
+		@Test
+		@DisplayName("findById resolves the exact partition+sort key item")
+		void findById_compositKey_resolvesExactItem() {
+			compositeRepository.save(new CompositeEntity(COMPOSITE_PK, MATCH_SK_1, "first"));
+			compositeRepository.save(new CompositeEntity(COMPOSITE_PK, MATCH_SK_2, "second"));
 
-	@Test
-	void scalarDeleteByIdRemovesForAPlainPartitionKey() {
-		scalarRepository.save(new ScalarEntity("scalar-delete", "x"));
-		Assertions.assertTrue(scalarRepository.existsById("scalar-delete"));
+			Optional<CompositeEntity> found = compositeRepository
+					.findById(DynamoDbCompositeId.of(COMPOSITE_PK, MATCH_SK_2));
 
-		scalarRepository.deleteById("scalar-delete");
+			assertTrue(found.isPresent(), "findById(composite) must resolve the PK+SK item");
+			assertAll("correct item selected by composite key",
+					() -> assertEquals(COMPOSITE_PK, found.get().getPartitionKey()),
+					() -> assertEquals(MATCH_SK_2, found.get().getSortKey()),
+					() -> assertEquals("second", found.get().getPayload(),
+							"the sort key must select MATCH#2, not the sibling MATCH#1 under the same partition key"));
+		}
 
-		Assertions.assertFalse(scalarRepository.existsById("scalar-delete"),
-				"deleteById(scalar) must remove a partition-key-only entity");
-	}
+		@Test
+		@DisplayName("existsById reflects presence of the exact PK+SK pair")
+		void existsById_compositeKey_correctBooleans() {
+			compositeRepository.save(new CompositeEntity(COMPOSITE_PK, MATCH_SK_1, "first"));
 
-	@Test
-	void compositeFindByIdResolvesTheExactPartitionAndSortKeyItem() {
-		compositeRepository.save(new CompositeEntity("cust-1", "MATCH#1", "first"));
-		compositeRepository.save(new CompositeEntity("cust-1", "MATCH#2", "second"));
+			assertAll("existence checks for composite key",
+					() -> assertTrue(compositeRepository.existsById(DynamoDbCompositeId.of(COMPOSITE_PK, MATCH_SK_1))),
+					() -> assertFalse(compositeRepository.existsById(DynamoDbCompositeId.of(COMPOSITE_PK, "MATCH#99"))),
+					() -> assertFalse(
+							compositeRepository.existsById(DynamoDbCompositeId.of("cust-absent", MATCH_SK_1))));
+		}
 
-		Optional<CompositeEntity> found = compositeRepository.findById(DynamoDbCompositeId.of("cust-1", "MATCH#2"));
+		@Test
+		@DisplayName("deleteById removes only the targeted PK+SK pair, leaving siblings intact")
+		void deleteById_compositeKey_removeOnlyTarget() {
+			compositeRepository.save(new CompositeEntity(COMPOSITE_PK, MATCH_SK_1, "first"));
+			compositeRepository.save(new CompositeEntity(COMPOSITE_PK, MATCH_SK_2, "second"));
 
-		Assertions.assertTrue(found.isPresent(), "findById(composite) must resolve the PK+SK item");
-		Assertions.assertEquals("cust-1", found.get().getPartitionKey());
-		Assertions.assertEquals("MATCH#2", found.get().getSortKey());
-		Assertions.assertEquals("second", found.get().getPayload(),
-				"the sort key must select MATCH#2, not the sibling MATCH#1 under the same partition key");
-	}
+			compositeRepository.deleteById(DynamoDbCompositeId.of(COMPOSITE_PK, MATCH_SK_1));
 
-	@Test
-	void compositeExistsByIdReflectsPresenceOfTheExactPair() {
-		compositeRepository.save(new CompositeEntity("cust-1", "MATCH#1", "first"));
-
-		Assertions.assertTrue(compositeRepository.existsById(DynamoDbCompositeId.of("cust-1", "MATCH#1")));
-		Assertions.assertFalse(compositeRepository.existsById(DynamoDbCompositeId.of("cust-1", "MATCH#99")));
-		Assertions.assertFalse(compositeRepository.existsById(DynamoDbCompositeId.of("cust-absent", "MATCH#1")));
-	}
-
-	@Test
-	void compositeDeleteByIdRemovesOnlyTheTargetedPairLeavingSiblingsIntact() {
-		compositeRepository.save(new CompositeEntity("cust-1", "MATCH#1", "first"));
-		compositeRepository.save(new CompositeEntity("cust-1", "MATCH#2", "second"));
-
-		compositeRepository.deleteById(DynamoDbCompositeId.of("cust-1", "MATCH#1"));
-
-		Assertions.assertFalse(compositeRepository.existsById(DynamoDbCompositeId.of("cust-1", "MATCH#1")),
-				"deleteById(composite) must remove the targeted PK+SK item");
-		Assertions.assertTrue(compositeRepository.existsById(DynamoDbCompositeId.of("cust-1", "MATCH#2")),
-				"the sibling row under the same partition key must be left intact");
+			assertAll("only the targeted item is removed",
+					() -> assertFalse(compositeRepository.existsById(DynamoDbCompositeId.of(COMPOSITE_PK, MATCH_SK_1)),
+							"deleteById(composite) must remove the targeted PK+SK item"),
+					() -> assertTrue(compositeRepository.existsById(DynamoDbCompositeId.of(COMPOSITE_PK, MATCH_SK_2)),
+							"the sibling row under the same partition key must be left intact"));
+		}
 	}
 }

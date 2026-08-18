@@ -19,12 +19,16 @@ import io.awspring.cloud.dynamodb.core.mapping.InnerClass;
 import java.time.LocalDate;
 import java.util.Objects;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class PlayerContact {
 	private String gamerTag;
 	private String realName;
 	private String email;
 	private LocalDate joinedAt;
-	@InnerClass(serializeAsJson = true)
+	@InnerClass(serializeAsNestedMap = true)
 	private Venue venue;
 
 	public PlayerContact() {

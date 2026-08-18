@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.entities;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class Team {
 
 	private String name;

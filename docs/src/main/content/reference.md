@@ -23,6 +23,7 @@ Every example in this guide builds one running domain: an **esports tournament a
    2.4. `@InnerClass`
    2.5. `@SortKeyTemplate`
    2.6. `@Table(discriminator = …)`
+   2.7. `@AggregateTable`
 3. Secondary index views
    3.1. A typed view
    3.2. A polymorphic container view
@@ -37,6 +38,7 @@ Every example in this guide builds one running domain: an **esports tournament a
    4.5. `@AllowScan`
    4.6. Limiting queries: `findFirst` / `findTop`
    4.7. Pagination
+   4.8. `AggregateRepository`
 5. `@Query` — explicit expressions
    5.1. Key conditions and filters
    5.2. `@Modifying` — single-item updates
@@ -112,7 +114,7 @@ The base class contributes the rest as overridable `@Bean` methods:
 | `dynamoDbConverter()`           | Entity ⇄ item mapping.                                           |
 | `dynamoDbMappingContext()`      | Entity metadata; scans `getEntityBasePackages()`.                |
 | `dynamoDbExceptionTranslator()` | Maps DynamoDB exceptions to Spring's `DataAccessException`.      |
-| `customConverters()`            | Return a list of custom converters to register.                  |
+| `customConversions()`           | The `DynamoDbConversions` bean; override the `customConverters()` hook to register converters. |
 | `propertyValueConversions()`    | Register per-property `@ValueConverter` implementations.         |
 
 By default entities are discovered by scanning the configuration class's own package. Override
@@ -156,8 +158,8 @@ fails fast when the application context starts rather than on first query. An en
 both `@Table` and `@SecondaryIndex` is likewise rejected — a class is either a base-table entity or
 a read-only index view, never both.
 
-`@PartitionKey` is deliberately *not* meta-annotated `@Id`; the base-table partition key is what
-`isIdProperty()` resolves to internally.
+`@PartitionKey` is meta-annotated with `@Id`, so Spring Data's `isIdProperty()` resolves the
+base-table partition key as the entity's id.
 
 ### 2.2. `@Column` — naming the physical attribute
 
@@ -210,9 +212,9 @@ public class Tournament {
 `version = <previous>` for an update. A concurrent modification surfaces as
 `OptimisticLockingFailureException`.
 
-Note that DynamoDB's `BatchWriteItem` cannot carry condition expressions, so `saveAll()` advances
-the version value on each item but **cannot enforce** the optimistic-locking guard. Use `save()`
-per item where the guard matters.
+Note that DynamoDB's `BatchWriteItem` cannot carry condition expressions, so the template's
+`saveAll()` **rejects** entities with a `@Version` property entirely — an
+`InvalidDataAccessApiUsageException` is thrown. Use `save()` per item where the guard matters.
 
 ### 2.4. `@InnerClass` — nested objects and single-table polymorphism
 
@@ -245,20 +247,47 @@ Selection rules:
 
 * **`startsWith` / `endsWith`** — populate the field only when the entity's own sort-key value
   matches that prefix/suffix; otherwise leave it `null`.
+* **`regex`** — populate the field only when the entity's own sort-key value matches the pattern in
+  full. The pattern is checked before `startsWith`/`endsWith`, and combining them is allowed: all
+  declared conditions must hold. It is compiled once when the entity is first mapped, so an invalid
+  pattern fails at bootstrap rather than on the first read.
 * **no marker** — populate when at least one of the embedded type's own columns is present in the
-  item. Two embedded types sharing a column name both read that same attribute.
-* **`serializeAsJson = true`** — opt out of flattening and store the object as a JSON string
-  instead. Useful for a collection of value objects that never needs to be queried.
+  item with a non-null value (an explicit DynamoDB `NUL` counts as absent). Two embedded types
+  sharing a column name both read that same attribute.
+* **`serializeAsNestedMap = true`** — opt out of flattening and store the object under a single
+  attribute as a nested DynamoDB map (`M`) instead. Useful for a value object that never needs to be
+  queried on its own attributes.
 
 ```java
 public class MatchData {
     private String round;
     private String region;
 
-    @InnerClass(serializeAsJson = true)
-    private List<Score> scores;      // one JSON string attribute
+    @InnerClass(serializeAsNestedMap = true)
+    private Venue venue;             // one nested M attribute, not flattened
 }
 ```
+
+The nested map is built by walking the type's declared fields reflectively, so `@Column` names are
+**not** applied inside it — attributes are named after the Java fields. `static`, `transient`, and
+synthetic fields are skipped. Reading requires a no-arg constructor (visibility does not matter).
+
+The flag applies to single-valued properties only. Collection-typed properties are already stored as
+native DynamoDB types (see section 8), so `@InnerClass` has no effect on them either way.
+
+Prefix routing cannot separate hierarchical sort keys where one kind's prefix is a prefix of
+another's. With `ORDER#9876` for an order and `ORDER#9876#LINE#abc` for its lines,
+`startsWith = "ORDER#"` matches both, so an order-line row populates the order field as well. Use
+`regex` to draw that boundary:
+
+```java
+@InnerClass(regex = "ORDER#[^#]+")            private OrderData     order;
+@InnerClass(regex = "ORDER#[^#]+#LINE#[^#]+") private OrderLineData line;
+```
+
+Ambiguity is never checked, whichever marker you use: if two members can match the same sort key,
+both are populated. Keep the routes mutually exclusive, or dispatch on an explicit discriminator
+attribute instead — see `@Table(discriminator = ...)` and `queryPolymorphic`.
 
 ### 2.5. `@SortKeyTemplate` — composed sort keys
 
@@ -273,6 +302,10 @@ public class Match {
 
     @PartitionKey private String pk;
 
+    // Do NOT annotate sk with @SortKey — the template owns this column.
+    // Declare it as a plain field so the template can write the composed value back.
+    private String sk;
+
     private String matchDate;      // "2026-01-18"
     private String matchId;        // "m1"
 }
@@ -281,6 +314,30 @@ public class Match {
 Saving that writes `sk = "MATCH#2026-01-18#m1"`, and reading decomposes it back onto `matchDate` and
 `matchId`. The placeholder properties are also persisted as their own ordinary columns. Updates
 recompose the templated column so it stays consistent with the underlying properties.
+
+Because reads always decompose from the composed column, the standalone placeholder attributes are
+redundant for mapping — they exist so that filter expressions can reference them and so a secondary
+index can key on them. Annotate a placeholder `@Derived` to keep it out of the item:
+
+```java
+@Table(tableName = "commerce")
+@SortKeyTemplate("ORDER#{orderId}#LINE#{lineId}")
+public class LineRow {
+
+    @PartitionKey private String pk;
+    private String sk;                    // "ORDER#9876#LINE#abc"
+
+    @Derived private String orderId;      // not stored, decomposed from sk on read
+    @Derived private String lineId;       // not stored, decomposed from sk on read
+}
+```
+
+That trades queryability for item size: a `@Derived` property cannot appear in a filter expression
+and cannot serve as an index key. Leave the annotation off when you need either.
+
+`@Derived` is rejected at bootstrap on a property that is not a placeholder of some
+`@SortKeyTemplate` on the same entity, on a key property, and on a primitive type — in each case the
+value could not be recovered on read.
 
 `column` targets an attribute other than `sk` — typically an overloaded GSI attribute:
 
@@ -331,6 +388,127 @@ a table where **no** entity opted in fails fast with a clear message — use a t
 (`query(Class, …)`) or a `@SecondaryIndex` view instead.
 
 ---
+
+
+### 2.7. `@AggregateTable` — read-only aggregation
+
+`@AggregateTable` provides a simpler way to model **Single Table Design for read queries**. It is
+designed specifically for **read-only aggregation**: instead of returning one object for every item
+and requiring callers to inspect which fields are populated, the annotation groups related entities
+from the same partition into a single aggregate object.
+
+`@AggregateItem` identifies which `@Table` entity should be mapped to each field. Routing is
+based on the entity's sort key and can use `startsWith`, `endsWith`, or `regex`:
+
+```java
+@AggregateTable(
+        tableName = "single_table_demo",
+        partitionKey = "pk",
+        sortKey = "sk"
+)
+public class CustomerRow {
+
+    @AggregateItem(regex = "ORDER#[^#]+")
+    private OrderData order;
+
+    @AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+")
+    private List<OrderLineData> line;
+}
+```
+
+The classes referenced by `@AggregateItem` must be annotated with `@Table`:
+
+```java
+@Table(tableName = "single_table_demo")
+public class OrderData {
+
+    @PartitionKey
+    private String pk;
+
+    @SortKey
+    private String sk;
+
+    private String customerId;
+}
+```
+
+```java
+@Table(tableName = "single_table_demo")
+public class OrderLineData {
+
+    @PartitionKey
+    private String pk;
+
+    @SortKey
+    private String sk;
+
+    private String productId;
+}
+```
+
+When the aggregate is queried, the module reads the matching rows and maps each row to the
+appropriate `@AggregateItem` field based on its sort-key pattern. This allows a query to return
+a single grouped representation instead of requiring application code to iterate over every result
+and check which field is populated.
+
+For example, given the following rows:
+
+| PK | SK |
+|---|---|
+| `CUSTOMER#123` | `ORDER#9876` |
+| `CUSTOMER#123` | `ORDER#9876#LINE#1` |
+| `CUSTOMER#123` | `ORDER#9876#LINE#2` |
+
+the rows can be grouped into a single aggregate:
+
+```java
+CustomerRow customer = ...;
+
+        customer.getOrder(); // OrderData
+        customer.getLine();  // List<OrderLineData>
+```
+
+Unlike `@InnerClass`, `@AggregateTable` is **read-only and intended for grouping query results**.
+It does not embed or flatten the child entities into the aggregate item, and it does not change how
+the child entities are persisted. The child types remain independently mapped `@Table` entities.
+
+The routing rules follow the same matching semantics as `@InnerClass`:
+
+- **`startsWith`** matches when the sort key starts with the specified prefix.
+- **`endsWith`** matches when the sort key ends with the specified suffix.
+- **`regex`** must match the entire sort-key value.
+- **`sortKey`** matches the SortKey column name when using `regex`, `startsWith` or `endsWith`. Used when multiple SortKeys exist in GlobalSecondaryIndex and Query contains multiple SortKeys.
+- **Multiple conditions** can be combined, in which case all conditions must match.
+
+As with `@InnerClass`, use `regex` when hierarchical sort keys would otherwise cause overlapping
+prefix matches. For example, `startsWith = "ORDER#"` would match both `ORDER#9876` and
+`ORDER#9876#LINE#1`, while `regex = "ORDER#[^#]+"` matches only the order row.
+
+Unlike `@InnerClass` (whose pattern is compiled and validated at bootstrap), an `@AggregateItem`
+regex is compiled on the first aggregate query, so an invalid pattern surfaces then rather than at
+application startup.
+
+`@AggregateTable` is useful when the primary goal is to **query a single-table design and group its
+heterogeneous rows into a convenient read model**, while keeping the underlying `@Table` entities
+independent and suitable for normal persistence.
+
+An aggregate is read through an `AggregateRepository<A>` (see section 4.8), or through the template's
+`queryAggregate(...)` when you need a hand-written key condition:
+
+```java
+DynamoDbQueryRequest request = DynamoDbQueryRequest.Builder.request()
+        .withKeyConditionExpression("#pk = :pk")
+        .withExpressionAttributeNames(Map.of("#pk", "pk"))
+        .withExpressionAttributeValues(Map.of(":pk", "CUSTOMER#123"))
+        .build();
+
+EntityQueryResult<CustomerRow> result =
+        operations.queryAggregate(CustomerRow.class, request, DynamoDbPageRequest.of(100));
+```
+
+`queryAggregate` pages through the entire matched partition (following `LastEvaluatedKey`) before
+folding the rows, so the aggregate is complete regardless of DynamoDB's 1 MB page limit.
+
 
 ## 3. Secondary index views: `@SecondaryIndex`
 
@@ -426,8 +604,8 @@ public class MatchesByRegionView {
 
 ### 3.5. Views are read-only
 
-A DynamoDB index cannot be written, and it has no `GetItem` — only `Query`. The module enforces
-both:
+A DynamoDB index cannot be written, and it has no `GetItem` — only `Query` and `Scan`. The module
+enforces both:
 
 ```java
 operations.save(new PlayerMatchesView(...));               // InvalidDataAccessApiUsageException
@@ -459,6 +637,11 @@ public interface ArenaItemRepository extends DynamoDbRepository<ArenaItem, Strin
 `DynamoDbRepository<T, ID>` extends `ListCrudRepository`, so `findAll()` and `findAllById(...)`
 return `List` rather than `Iterable`, matching the other Spring Data store modules. It adds
 `update(entity)` on top of the standard CRUD surface.
+
+Note that the repository's inherited `saveAll(...)` calls `save()` per entity (individual `PutItem`
+calls with full `@Version` support). To use `BatchWriteItem` instead, inject `DynamoDbOperations`
+and call its `saveAll()` method directly — that path batches at 25 but cannot enforce
+optimistic-locking conditions.
 
 `existsById(id)` issues a projection-only `GetItem` that returns only the partition-key attribute
 and never triggers entity conversion or lifecycle events.
@@ -505,8 +688,10 @@ request reach the service:
 * **Every partition-key attribute must be supplied, with equality.** You cannot query a subset of a
   multi-attribute partition key, nor use an inequality on one.
 * **Sort-key attributes match left-to-right with no gaps.** For sort key `(round, bracket, matchId)`,
-  `round` alone is valid and so is `round` + `bracket`; `round` + `matchId` (skipping `bracket`) is
-  rejected.
+  `round` alone is valid and so is `round` + `bracket`; in `round` + `matchId` the skipped `bracket`
+  demotes `matchId` from a key condition to a filter expression (the query still runs, just less
+  selectively — and if nothing usable remains as a key condition it degrades to a `Scan` and needs
+  `@AllowScan`).
 * **At most one inequality, and it must be last.** `>`, `>=`, `BETWEEN` and `begins_with` are all
   inequalities in this sense.
 
@@ -515,15 +700,15 @@ request reach the service:
 List<MatchesByTournamentRegionView> findByTournamentIdAndRegionAndRound(
         String tournamentId, String region, String round);
 
-// rejected at bootstrap: skips "bracket"
+// "matchId" is demoted to a filter expression because "bracket" is skipped
 List<MatchesByTournamentRegionView> findByTournamentIdAndRegionAndRoundAndMatchId(...);
 ```
 
-**Current limitation.** Inequality predicates on a *declared* `@SortKey` property
-(`…AndCreatedAtGreaterThanEqual`) are currently emitted as a filter expression rather than a
-sort-key condition, which DynamoDB rejects for a key attribute. Prefer equality or `StartingWith` on
-sort keys in derived methods, or use `@Query`/`IndexQueryBuilder` (sections 5 and 6) for range
-conditions. Prefix ranges over a `@SortKeyTemplate`-composed key work as expected.
+Inequality predicates on a declared `@SortKey` are emitted as sort-key conditions, not filter
+expressions: `…AndCreatedAtGreaterThanEqual`, `…AndCreatedAtBetween` and `…AndCreatedAtStartingWith`
+all become part of the `KeyConditionExpression`. An inequality on a *partition*-key attribute cannot
+be a key condition, so such a method degrades to a `Scan` and requires `@AllowScan`. Prefix ranges
+over a `@SortKeyTemplate`-composed key work as expected.
 
 ### 4.5. `@AllowScan` — no silent full-table scans
 
@@ -583,6 +768,59 @@ if (page.hasNext()) {
 Only a keyset `ScrollPosition` is accepted (`ScrollPosition.keyset()`, `.forward(...)`,
 `.backward(...)`); an offset position raises `InvalidDataAccessApiUsageException`.
 
+DynamoDB returns a single resume cursor per page (`LastEvaluatedKey`), which points *after* the last
+item, so a position is only available for the final element: call
+`positionAt(window.size() - 1)`, as above. Any other index raises `IllegalStateException` rather than
+returning the page-end cursor, which would silently skip the rows in between. Use
+`window.hasPosition(index)` if you want to probe without catching.
+
+### 4.8. `AggregateRepository`
+
+An `@AggregateTable` (section 2.7) is read through an `AggregateRepository<A>`, the read-only
+counterpart to `SecondaryIndexRepository`:
+
+```java
+public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+}
+```
+
+It contributes a fixed set of partition-oriented finders — there are no derived query methods, since
+an aggregate always folds one partition (or one index collection) into a single object:
+
+```java
+Optional<CustomerRow> whole    = repository.findByPartitionKey("CUSTOMER#123");
+Optional<CustomerRow> point    = repository.findByPartitionKeyAndSortKey("CUSTOMER#123", "ORDER#9876");
+Optional<CustomerRow> range    = repository.findByPartitionKeyAndSortKeyBetween(
+                                     "CUSTOMER#123", "ORDER#0000", "ORDER#9999");
+Optional<CustomerRow> prefixed = repository.findByPartitionKeyAndSortKeyStartingWith(
+                                     "CUSTOMER#123", "ORDER#9876#LINE#");
+boolean populated              = repository.existsByPartitionKey("CUSTOMER#123");
+```
+
+Each finder issues one `Query`, pages through the whole result following `LastEvaluatedKey`, and
+folds the rows onto the aggregate's `@AggregateItem` fields. `findByPartitionKeyAndSortKey` narrows
+to a single item, `…StartingWith` to a `begins_with` prefix, and `…Between` to a sort-key range.
+
+For a key condition the fixed finders cannot express, add a `@Query` method whose expression is
+passed straight through to `queryAggregate`:
+
+```java
+public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+
+    @Query(keyConditionExpression = "#pk = :pk AND begins_with(#sk, :prefix)",
+           names = { @ExpressionName(name = "#pk", value = "pk"),
+                     @ExpressionName(name = "#sk", value = "sk") })
+    Optional<CustomerRow> loadOrderLines(@Param("pk") String pk, @Param("prefix") String prefix);
+}
+```
+
+Derived query methods and `@Modifying` methods are both rejected at bootstrap on an
+`AggregateRepository` — only the fixed finders and read-only `@Query` methods are allowed, because an
+aggregate is a read-only projection and `@AggregateTable` never changes how the underlying `@Table`
+entities are written. When the aggregate is index-backed (`@AggregateTable(indexName = "GSI2", …)`),
+the same finders run against that index, and `partitionKey`/`sortKey` name the index's key
+attributes.
+
 ---
 
 ## 5. `@Query` — explicit expressions
@@ -611,10 +849,12 @@ public interface MatchRepository extends DynamoDbRepository<Match, String> {
 Parameters bind by name: the `:region` placeholder in the expression resolves to the argument
 annotated `@Param("region")` — declare the `@Param` name **without** the leading colon.
 `@ExpressionName` maps a `#alias` to a real attribute name, which also sidesteps DynamoDB's reserved
-words (`region`, `year`, `status`, …). `@ExpressionValue` supplies a constant value inline.
+words (`region`, `year`, `status`, …). `@ExpressionValue` supplies a value inline, evaluated as a SpEL expression (a quoted literal such as `'ACTIVE'` is the common case).
 
 `keyConditionExpression` is an escape hatch: it bypasses the module's key-condition validation
-entirely, so `indexName` is mandatory when the query targets an index, and correctness is yours.
+entirely, so `indexName` must always be set explicitly when you use it (the escape hatch does not
+auto-select an index), and correctness is yours. `AggregateRepository` `@Query` methods are exempt
+from this requirement.
 
 Other attributes: `consistentRead`, `limit`, `allowScan` (the `@Query`-side equivalent of
 `@AllowScan`), and `typeFilter`.
@@ -675,8 +915,10 @@ operations.delete(match);
 operations.delete(Match.class, "TOURNAMENT#winter2026", "MATCH#m1");
 ```
 
-`saveAll()` requires all entities to be of the same type; a mixed-type collection is rejected with
-`InvalidDataAccessApiUsageException`.
+`saveAll()` accepts entities of mixed types: items are grouped by their resolved table name and
+dispatched as one or more `BatchWriteItem` requests (chunked at 25). Unprocessed items are retried
+with exponential backoff. `@Version` entities are rejected because `BatchWriteItem` cannot carry
+condition expressions.
 
 ### 6.2. Reads
 
@@ -757,7 +999,7 @@ public class MatchAuditCallback implements DynamoDbBeforeSaveCallback<Match> {
 | Callback                        | When                                      |
 |---------------------------------|-------------------------------------------|
 | `DynamoDbBeforeConvertCallback` | before the entity is converted to an item |
-| `DynamoDbBeforeSaveCallback`    | after conversion, before the write        |
+| `DynamoDbBeforeSaveCallback`    | after `BeforeConvert`, still before the entity is converted and written |
 | `DynamoDbAfterSaveCallback`     | after a successful write                  |
 | `DynamoDbAfterConvertCallback`  | after an item is read back into an entity |
 
@@ -796,24 +1038,42 @@ public class Match {
 
 Enums are stored as their `name()`. Collections map to native DynamoDB types: a `Set<String>`
 becomes a String Set (`SS`), a `Set<Number>` a Number Set (`NS`), a `Set<byte[]>` a Binary Set
-(`BS`), and a `List` an `L`. No JSON serialization is involved unless you ask for it with
-`@InnerClass(serializeAsJson = true)`.
+(`BS`), and a `List` an `L`. A `Set` whose elements are of mixed types falls back to an `L`. No JSON
+serialization is involved anywhere; `@InnerClass(serializeAsNestedMap = true)` stores a nested map
+(`M`), not a JSON string.
+
+DynamoDB cannot store an empty `SS`/`NS`/`BS`, so an **empty `Set` is written as an empty `L`**. It
+still reads back as an empty `Set`, because the read path dispatches on the declared property type.
+The consequence is that the stored attribute type depends on cardinality: non-empty is `SS`, empty is
+`L`. Consumers that switch on the raw attribute type — Streams processors, other-language readers —
+need to handle both.
+
+A `null` property is written as an explicit `NUL` attribute rather than being omitted. A `null`
+`@InnerClass` member writes nothing at all. If you rely on sparse secondary indexes or
+`attribute_not_exists(...)` conditions, keep those attributes off entities that persist them as
+`null`.
 
 ---
 
 ## 9. Exception translation
 
 Every SDK call is routed through a `DynamoDbExceptionTranslator`, so DynamoDB failures arrive as
-Spring's `DataAccessException` hierarchy:
+Spring's `DataAccessException` hierarchy. The first four rows below are produced by the template's
+write path, which intercepts `ConditionalCheckFailedException` before translation; the remaining
+rows are the default translator:
 
-| DynamoDB condition                     | Spring exception                     |
-|----------------------------------------|--------------------------------------|
-| version condition failed on `save`     | `OptimisticLockingFailureException`  |
-| `insert` onto an existing key          | `DuplicateKeyException`              |
-| other failed condition expression      | `DataIntegrityViolationException`    |
-| malformed expression / statement       | `BadStatementGrammarException`       |
-| unmapped SDK exception                 | `UncategorizedDynamoDbException`     |
-| a view used for a write or `findById`  | `InvalidDataAccessApiUsageException` |
+| DynamoDB condition                                                                    | Spring exception                          |
+|---------------------------------------------------------------------------------------|-------------------------------------------|
+| version condition failed on `save` / `update`                                         | `OptimisticLockingFailureException`       |
+| `insert` onto an existing key                                                         | `DuplicateKeyException`                   |
+| other failed condition expression on a write                                          | `DataIntegrityViolationException`         |
+| a view used for a write or `findById`                                                 | `InvalidDataAccessApiUsageException`      |
+| `DuplicateItemException`                                                               | `DuplicateKeyException`                   |
+| `TransactionConflictException` / a bare `ConditionalCheckFailedException`             | `ConcurrencyFailureException`             |
+| `ProvisionedThroughputExceededException` / `ItemCollectionSizeLimitExceededException` | `TransientDataAccessResourceException`    |
+| `RequestLimitExceededException`                                                       | `NonTransientDataAccessResourceException` |
+| `ResourceNotFoundException` (table or index missing)                                  | `BadStatementGrammarException`            |
+| any other `AwsServiceException`                                                       | `UncategorizedDynamoDbException`          |
 
 Override `dynamoDbExceptionTranslator()` to supply your own.
 
@@ -828,8 +1088,11 @@ Override `dynamoDbExceptionTranslator()` to supply your own.
 | `@PartitionKey`               | field/method  | Partition-key component. `value`, `order`. Repeatable                  |
 | `@SortKey`                    | field/method  | Sort-key component. `value`, `order`. Repeatable                       |
 | `@Column`                     | field/method  | Physical attribute name. `value`, `isStatic`                           |
-| `@InnerClass`                 | field         | Flattened embedded object. `startsWith`, `endsWith`, `serializeAsJson` |
+| `@InnerClass`                 | field         | Flattened embedded object. `startsWith`, `endsWith`, `regex`, `serializeAsNestedMap` |
+| `@AggregateTable`             | type          | Read-only aggregate over a partition or index. `tableName`, `partitionKey`, `sortKey`, `indexName` |
+| `@AggregateItem`              | field         | Routes matched rows onto an aggregate field. `startsWith`, `endsWith`, `regex`, `sortKey` |
 | `@SortKeyTemplate`            | type          | Composed sort key. `value`, `column`. Repeatable                       |
+| `@Derived`                    | field/method  | Reconstructed on read, never written. Only on `@SortKeyTemplate` placeholders |
 | `@Version`                    | field         | Optimistic locking (Spring Data)                                       |
 | `@Query`                      | method        | Explicit key condition / filter / PartiQL / update expression          |
 | `@Modifying`                  | method        | Marks a `@Query` as a single-item `UpdateItem`                         |
@@ -837,5 +1100,9 @@ Override `dynamoDbExceptionTranslator()` to supply your own.
 | `@ExpressionName`             | (in `@Query`) | Maps `#alias` to an attribute name                                     |
 | `@ExpressionValue`            | (in `@Query`) | Supplies a constant `:value`                                           |
 | `@EnableDynamoDbRepositories` | type          | Enables repository scanning                                            |
+
+> The **Target** column lists each annotation's primary usage site. The key and attribute
+> annotations also allow `ElementType.ANNOTATION_TYPE` (and `@Column` additionally `PARAMETER`) so
+> they can be composed into custom meta-annotations.
 
 ---

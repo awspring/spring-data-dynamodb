@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -34,31 +35,41 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.repository.AllowScan;
 import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbScanRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbScanRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
 import io.awspring.cloud.dynamodb.request.IndexQueryBuilder;
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.KeysetScrollPosition;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
+import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
 
-public class PartTreeDynamoDbQueryReplayTest {
+@DisplayName("PartTreeDynamoDbQuery — replay-based verification of query derivation")
+class PartTreeDynamoDbQueryReplayTest {
 
-	interface MatchRepository extends org.springframework.data.repository.Repository<Match, String> {
+	private static final String PARTITION_KEY_VALUE = "cust-1";
+	private static final String MATCH_ID_1 = "match-1";
+	private static final String MATCH_ID_2 = "match-2";
+	private static final String ROUND_QUARTERFINAL = "QUARTERFINAL";
+	private static final String TABLE_NAME = "orders";
+
+	interface MatchRepository extends Repository<Match, String> {
 		List<Match> findByTournamentId(String tournamentId);
 
 		List<Match> findByTournamentIdAndRound(String tournamentId, String round);
@@ -80,7 +91,7 @@ public class PartTreeDynamoDbQueryReplayTest {
 				org.springframework.data.domain.Pageable pageable);
 	}
 
-	@Table(tableName = "orders")
+	@Table(tableName = TABLE_NAME)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -101,6 +112,22 @@ public class PartTreeDynamoDbQueryReplayTest {
 
 		@Nullable
 		EntityQueryResult<List<Object>> scriptedQueryResult;
+
+		final Deque<EntityQueryResult<List<Object>>> scriptedQueryPages = new ArrayDeque<>();
+
+		int queryInvocations;
+
+		long scriptedCount;
+		boolean countedViaQuery;
+
+		@Nullable
+		Object scriptedUpdatedEntity;
+		@Nullable
+		Object lastUpdatePartitionKey;
+		@Nullable
+		Object lastUpdateSortKey;
+		@Nullable
+		DynamoDbUpdateExpressionRequest lastCapturedUpdateRequest;
 
 		@Nullable
 		String lastStatement;
@@ -140,19 +167,17 @@ public class PartTreeDynamoDbQueryReplayTest {
 				DynamoDbPageRequest dynamoDBPageRequest) {
 			this.lastCapturedRequest = queryRequest;
 			this.lastCapturedPageRequest = dynamoDBPageRequest;
+			this.queryInvocations++;
 			return scriptedResultOrEmpty();
 		}
 
 		@SuppressWarnings("unchecked")
 		private <T> EntityQueryResult<List<T>> scriptedResultOrEmpty() {
+			if (!scriptedQueryPages.isEmpty()) {
+				return (EntityQueryResult<List<T>>) (EntityQueryResult<?>) scriptedQueryPages.poll();
+			}
 			return scriptedQueryResult != null ? (EntityQueryResult<List<T>>) (EntityQueryResult<?>) scriptedQueryResult
 					: EntityQueryResultAccess.of(List.of());
-		}
-
-		@Override
-		public <T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequestInterface builderFunction,
-				DynamoDbPageRequest dynamoDBPageRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
 		}
 
 		@Override
@@ -162,23 +187,34 @@ public class PartTreeDynamoDbQueryReplayTest {
 		}
 
 		@Override
-		public <T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequestInterface builderFunction) {
-			throw new UnsupportedOperationException("not exercised by this test");
-		}
-
-		@Override
 		public <T> long count(Class<T> entityClass) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
 
 		@Override
 		public <T> long count(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
+			this.lastCapturedScanRequest = scanRequest;
+			return scriptedCount;
 		}
 
 		@Override
 		public <T> boolean exists(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
+			this.lastCapturedScanRequest = scanRequest;
+			return scriptedCount > 0L;
+		}
+
+		@Override
+		public <T> long count(Class<T> entityClass, DynamoDbQueryRequest queryRequest) {
+			this.lastCapturedRequest = queryRequest;
+			this.countedViaQuery = true;
+			return scriptedCount;
+		}
+
+		@Override
+		public <T> boolean exists(Class<T> entityClass, DynamoDbQueryRequest queryRequest) {
+			this.lastCapturedRequest = queryRequest;
+			this.countedViaQuery = true;
+			return scriptedCount > 0L;
 		}
 
 		@Override
@@ -208,17 +244,12 @@ public class PartTreeDynamoDbQueryReplayTest {
 		}
 
 		@Override
-		public <T> EntityWriteResult<T> save(T entity, DynamoDbConditionRequestInterface builderFunction) {
-			throw new UnsupportedOperationException("not exercised by this test");
-		}
-
-		@Override
 		public <T> EntityWriteResult<T> insert(T entity) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
 
 		@Override
-		public <T> Iterable<T> saveAll(Iterable<T> entities) {
+		public <T> Iterable<T> saveAll(Iterable<? extends T> entities) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
 
@@ -240,12 +271,6 @@ public class PartTreeDynamoDbQueryReplayTest {
 		@Override
 		public <T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey,
 				DynamoDbConditionRequest dynamoDBConditionRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
-		}
-
-		@Override
-		public <T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey,
-				DynamoDbConditionRequestInterface builderFunction) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
 
@@ -302,7 +327,10 @@ public class PartTreeDynamoDbQueryReplayTest {
 		@Override
 		public <T> EntityWriteResult<T> update(Object partitionKey, @Nullable Object sortKey,
 				DynamoDbUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass) {
-			throw new UnsupportedOperationException("not exercised by this test");
+			this.lastUpdatePartitionKey = partitionKey;
+			this.lastUpdateSortKey = sortKey;
+			this.lastCapturedUpdateRequest = dynamoDBUpdateExpressionRequest;
+			return EntityWriteResultAccess.of(entityClass.cast(scriptedUpdatedEntity));
 		}
 
 		@Override
@@ -314,6 +342,13 @@ public class PartTreeDynamoDbQueryReplayTest {
 		@Override
 		public String getTableName(Class<?> entityClass) {
 			return converter.getMappingContext().getRequiredPersistentEntity(entityClass).getTableName();
+		}
+
+		@Override
+		@Nullable
+		public <A> EntityQueryResult<A> queryAggregate(Class<A> aggregateClass, DynamoDbQueryRequest dynamoDbRequest,
+				DynamoDbPageRequest dynamoDBPageRequest) {
+			throw new UnsupportedOperationException("not exercised by this test");
 		}
 	}
 
@@ -343,6 +378,20 @@ public class PartTreeDynamoDbQueryReplayTest {
 		}
 	}
 
+	static final class EntityWriteResultAccess {
+		@SuppressWarnings("unchecked")
+		static <T> EntityWriteResult<T> of(@Nullable T entity) {
+			try {
+				Method of = EntityWriteResult.class.getDeclaredMethod("of", Object.class);
+				of.setAccessible(true);
+				return (EntityWriteResult<T>) of.invoke(null, entity);
+			}
+			catch (ReflectiveOperationException e) {
+				throw new IllegalStateException(e);
+			}
+		}
+	}
+
 	static final class EntityReadResultAccess {
 		@SuppressWarnings("unchecked")
 		static <T> EntityReadResult<T> of(T entity) {
@@ -362,14 +411,14 @@ public class PartTreeDynamoDbQueryReplayTest {
 		}
 	}
 
-	@Test
-	void sliceReturnTypeIsRejectedAtQueryMethodConstruction() {
-		org.springframework.dao.InvalidDataAccessApiUsageException ex = assertThrows(
-				org.springframework.dao.InvalidDataAccessApiUsageException.class,
-				() -> queryMethodFor("findSliceByTournamentId", String.class,
-						org.springframework.data.domain.Pageable.class));
-		assertTrue(ex.getMessage().contains("Slice"));
-		assertTrue(ex.getMessage().contains("Window"));
+	// ─── Shared fixture setup ───────────────────────────────────────────────────
+
+	private CapturingOperations newCapturingOperations() {
+		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+		mappingContext.getRequiredPersistentEntity(Match.class);
+		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
+		converter.afterPropertiesSet();
+		return new CapturingOperations(converter);
 	}
 
 	private static DynamoDbQueryMethod queryMethodFor(String name, Class<?>... paramTypes)
@@ -382,212 +431,250 @@ public class PartTreeDynamoDbQueryReplayTest {
 		return new DynamoDbQueryMethod(method, metadata, projectionFactory, mappingContext);
 	}
 
-	@Test
-	void partitionOnlyQueryReplaysIntoAKeyConditionOnTheBaseTable() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+	// ─── Tests ──────────────────────────────────────────────────────────────────
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+	@Nested
+	@DisplayName("Return type validation")
+	class ReturnTypeValidation {
 
-		query.execute(new Object[] { "cust-1" });
+		@Test
+		@DisplayName("Slice return type is rejected at query method construction time")
+		void sliceReturnTypeIsRejectedAtQueryMethodConstruction() {
+			org.springframework.dao.InvalidDataAccessApiUsageException ex = assertThrows(
+					org.springframework.dao.InvalidDataAccessApiUsageException.class,
+					() -> queryMethodFor("findSliceByTournamentId", String.class,
+							org.springframework.data.domain.Pageable.class));
 
-		assertNotNull(operations.lastCapturedRequest);
-		assertNull(operations.lastCapturedRequest.getIndexName());
-		assertTrue(operations.lastCapturedRequest.getKeyConditionExpression().contains("="));
-		assertTrue(operations.lastCapturedRequest.getExpressionAttributeValues().containsValue("cust-1"));
-	}
-
-	@Test
-	void findFirstReturnsSingleResultWithoutThrowingWhenMultipleMatchAndAppliesLimitOne() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
-
-		Match first = new Match();
-		first.tournamentId = "cust-1";
-		first.matchId = "match-1";
-		Match second = new Match();
-		second.tournamentId = "cust-1";
-		second.matchId = "match-2";
-		operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(first, second));
-
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findFirstByTournamentId", String.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
-
-		Object result = query.execute(new Object[] { "cust-1" });
-
-		assertNotNull(result);
-		assertEquals(first, result);
-		assertNotNull(operations.lastCapturedPageRequest);
-		assertEquals(1, operations.lastCapturedPageRequest.getLimit());
-	}
-
-	@Test
-	void findTopNAppliesTheDerivedLimitToTheQuery() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
-
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findTop2ByTournamentId", String.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
-
-		query.execute(new Object[] { "cust-1" });
-
-		assertNotNull(operations.lastCapturedPageRequest);
-		assertEquals(2, operations.lastCapturedPageRequest.getLimit());
-	}
-
-	@Test
-	void partitionPlusNonKeyEqualityReplaysWithAResolvableFilterExpression() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
-
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndRound", String.class, String.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
-
-		query.execute(new Object[] { "cust-1", "QUARTERFINAL" });
-
-		DynamoDbQueryRequest request = operations.lastCapturedRequest;
-		assertNotNull(request);
-		assertNotNull(request.getFilterExpression());
-		assertFalse(request.getFilterExpression().isEmpty());
-		assertTrue(request.getExpressionAttributeValues().containsValue("QUARTERFINAL"));
-		for (String token : request.getExpressionAttributeNames().keySet()) {
-			assertTrue(request.getFilterExpression().contains(token)
-					|| request.getKeyConditionExpression().contains(token));
+			assertAll(() -> assertTrue(ex.getMessage().contains("Slice")),
+					() -> assertTrue(ex.getMessage().contains("Window")));
 		}
 	}
 
-	@Test
-	void indexServableMethodConstructsWithoutAllowScan() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+	@Nested
+	@DisplayName("Partition-key queries")
+	class PartitionKeyQueries {
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
+		@Test
+		@DisplayName("Partition-only query replays into a key condition on the base table")
+		void partitionOnlyQueryReplaysIntoAKeyConditionOnTheBaseTable() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
 
-		assertNotNull(new PartTreeDynamoDbQuery(queryMethod, operations));
+			query.execute(new Object[] { PARTITION_KEY_VALUE });
+
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertNull(operations.lastCapturedRequest.getIndexName()),
+					() -> assertTrue(operations.lastCapturedRequest.getKeyConditionExpression().contains("=")),
+					() -> assertTrue(operations.lastCapturedRequest.getExpressionAttributeValues()
+							.containsValue(PARTITION_KEY_VALUE)));
+		}
+
+		@Test
+		@DisplayName("Partition plus non-key equality replays with a resolvable filter expression")
+		void partitionPlusNonKeyEqualityReplaysWithAResolvableFilterExpression() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndRound", String.class, String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			query.execute(new Object[] { PARTITION_KEY_VALUE, ROUND_QUARTERFINAL });
+
+			DynamoDbQueryRequest request = operations.lastCapturedRequest;
+			assertAll(() -> assertNotNull(request), () -> assertNotNull(request.getFilterExpression()),
+					() -> assertFalse(request.getFilterExpression().isEmpty()),
+					() -> assertTrue(request.getExpressionAttributeValues().containsValue(ROUND_QUARTERFINAL)), () -> {
+						for (String token : request.getExpressionAttributeNames().keySet()) {
+							assertTrue(request.getFilterExpression().contains(token)
+									|| request.getKeyConditionExpression().contains(token));
+						}
+					});
+		}
 	}
 
-	@Test
-	void scanRequiringMethodWithoutAllowScanFailsAtConstructionNotAtFirstInvocation() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+	@Nested
+	@DisplayName("Limiting queries (findFirst / findTopN)")
+	class LimitingQueries {
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findByRound", String.class);
+		@Test
+		@DisplayName("findFirst returns a single result and applies limit=1")
+		void findFirstReturnsSingleResultWithoutThrowingWhenMultipleMatchAndAppliesLimitOne()
+				throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
 
-		org.springframework.dao.InvalidDataAccessApiUsageException ex = assertThrows(
-				org.springframework.dao.InvalidDataAccessApiUsageException.class,
-				() -> new PartTreeDynamoDbQuery(queryMethod, operations));
-		assertTrue(ex.getMessage().contains("AllowScan"));
-		assertNull(operations.lastCapturedRequest);
+			Match first = new Match();
+			first.tournamentId = PARTITION_KEY_VALUE;
+			first.matchId = MATCH_ID_1;
+			Match second = new Match();
+			second.tournamentId = PARTITION_KEY_VALUE;
+			second.matchId = MATCH_ID_2;
+			operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(first, second));
+
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findFirstByTournamentId", String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			Object result = query.execute(new Object[] { PARTITION_KEY_VALUE });
+
+			assertAll(() -> assertNotNull(result), () -> assertEquals(first, result),
+					() -> assertNotNull(operations.lastCapturedPageRequest),
+					() -> assertEquals(1, operations.lastCapturedPageRequest.getLimit()));
+		}
+
+		@Test
+		@DisplayName("findTopN applies the derived limit to the query")
+		void findTopNAppliesTheDerivedLimitToTheQuery() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findTop2ByTournamentId", String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			query.execute(new Object[] { PARTITION_KEY_VALUE });
+
+			assertAll(() -> assertNotNull(operations.lastCapturedPageRequest),
+					() -> assertEquals(2, operations.lastCapturedPageRequest.getLimit()));
+		}
 	}
 
-	@Test
-	void scanRequiringMethodWithAllowScanConstructsAndExecutesAsAScan() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+	@Nested
+	@DisplayName("Scan behaviour and @AllowScan gating")
+	class ScanBehaviour {
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findAllowedByRound", String.class);
+		@Test
+		@DisplayName("Index-servable method constructs without @AllowScan")
+		void indexServableMethodConstructsWithoutAllowScan() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentId", String.class);
 
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+			assertNotNull(new PartTreeDynamoDbQuery(queryMethod, operations));
+		}
 
-		query.execute(new Object[] { "QUARTERFINAL" });
+		@Test
+		@DisplayName("Scan-requiring method without @AllowScan fails at construction, not at invocation")
+		void scanRequiringMethodWithoutAllowScanFailsAtConstructionNotAtFirstInvocation() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByRound", String.class);
 
-		assertNotNull(operations.lastCapturedScanRequest);
-		assertNotNull(operations.lastCapturedScanRequest.getFilterExpression());
-		assertTrue(operations.lastCapturedScanRequest.getExpressionAttributeValues().containsValue("QUARTERFINAL"));
+			org.springframework.dao.InvalidDataAccessApiUsageException ex = assertThrows(
+					org.springframework.dao.InvalidDataAccessApiUsageException.class,
+					() -> new PartTreeDynamoDbQuery(queryMethod, operations));
+
+			assertAll(() -> assertTrue(ex.getMessage().contains("AllowScan")),
+					() -> assertNull(operations.lastCapturedRequest));
+		}
+
+		@Test
+		@DisplayName("Scan-requiring method with @AllowScan constructs and executes as a scan")
+		void scanRequiringMethodWithAllowScanConstructsAndExecutesAsAScan() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findAllowedByRound", String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			query.execute(new Object[] { ROUND_QUARTERFINAL });
+
+			assertAll(() -> assertNotNull(operations.lastCapturedScanRequest),
+					() -> assertNotNull(operations.lastCapturedScanRequest.getFilterExpression()),
+					() -> assertTrue(operations.lastCapturedScanRequest.getExpressionAttributeValues()
+							.containsValue(ROUND_QUARTERFINAL)));
+		}
 	}
 
-	@Test
-	void windowWithMoreResultsCarriesAForwardScrollPositionAndHasNext() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+	@Nested
+	@DisplayName("Window (keyset scroll) pagination")
+	class WindowPagination {
 
-		Match match = new Match();
-		match.tournamentId = "cust-1";
-		match.matchId = "match-1";
-		Map<String, Object> nextKey = Map.of("tournamentId", "cust-1", "matchId", "match-1");
-		operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(match), nextKey);
+		@Test
+		@DisplayName("Window with more results carries a forward scroll position and hasNext=true")
+		void windowWithMoreResultsCarriesAForwardScrollPositionAndHasNext() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class, ScrollPosition.class,
-				Limit.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+			Match match = new Match();
+			match.tournamentId = PARTITION_KEY_VALUE;
+			match.matchId = MATCH_ID_1;
+			Map<String, Object> nextKey = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_1);
+			operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(match), nextKey);
 
-		Object result = query.execute(new Object[] { "cust-1", ScrollPosition.keyset(), Limit.of(10) });
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class,
+					ScrollPosition.class, Limit.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
 
-		assertNotNull(result);
-		org.springframework.data.domain.Window<?> window = (org.springframework.data.domain.Window<?>) result;
-		assertTrue(window.hasNext());
-		assertEquals(1, window.size());
-		org.springframework.data.domain.ScrollPosition nextPosition = window.positionAt(0);
-		assertTrue(nextPosition instanceof org.springframework.data.domain.KeysetScrollPosition);
-		assertEquals(nextKey, ((org.springframework.data.domain.KeysetScrollPosition) nextPosition).getKeys());
-		assertNotNull(operations.lastCapturedPageRequest);
-		assertEquals(10, operations.lastCapturedPageRequest.getLimit());
-	}
+			Object result = query.execute(new Object[] { PARTITION_KEY_VALUE, ScrollPosition.keyset(), Limit.of(10) });
 
-	@Test
-	void windowOnTheLastPageHasNoNextAndAnInitialScrollPosition() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
+			assertNotNull(result);
+			Window<?> window = (Window<?>) result;
+			assertAll(() -> assertTrue(window.hasNext()), () -> assertEquals(1, window.size()), () -> {
+				ScrollPosition nextPosition = window.positionAt(0);
+				assertTrue(nextPosition instanceof KeysetScrollPosition);
+				assertEquals(nextKey, ((KeysetScrollPosition) nextPosition).getKeys());
+			}, () -> assertNotNull(operations.lastCapturedPageRequest),
+					() -> assertEquals(10, operations.lastCapturedPageRequest.getLimit()));
+		}
 
-		Match match = new Match();
-		match.tournamentId = "cust-1";
-		operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(match), null);
+		@Test
+		@DisplayName("Window on the last page has no next and an initial scroll position")
+		void windowOnTheLastPageHasNoNextAndAnInitialScrollPosition() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class, ScrollPosition.class,
-				Limit.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+			Match match = new Match();
+			match.tournamentId = PARTITION_KEY_VALUE;
+			operations.scriptedQueryResult = EntityQueryResultAccess.of(List.<Object> of(match), null);
 
-		Window<?> window = (Window<?>) query
-				.execute(new Object[] { "cust-1", ScrollPosition.keyset(), Limit.unlimited() });
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class,
+					ScrollPosition.class, Limit.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
 
-		assertFalse(window.hasNext());
-	}
+			Window<?> window = (Window<?>) query
+					.execute(new Object[] { PARTITION_KEY_VALUE, ScrollPosition.keyset(), Limit.unlimited() });
 
-	@Test
-	void inboundKeysetScrollPositionBecomesTheExclusiveStartKeyOnTheNextRequest() throws NoSuchMethodException {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Match.class);
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
-		converter.afterPropertiesSet();
-		CapturingOperations operations = new CapturingOperations(converter);
-		operations.scriptedQueryResult = EntityQueryResultAccess.of(List.of(), null);
+			assertFalse(window.hasNext());
+		}
 
-		DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class, ScrollPosition.class,
-				Limit.class);
-		PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+		@Test
+		@DisplayName("Inbound keyset scroll position becomes the exclusive start key on the next request")
+		void inboundKeysetScrollPositionBecomesTheExclusiveStartKeyOnTheNextRequest() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			operations.scriptedQueryResult = EntityQueryResultAccess.of(List.of(), null);
 
-		Map<String, Object> resumeFrom = Map.of("tournamentId", "cust-1", "matchId", "match-1");
-		query.execute(new Object[] { "cust-1", ScrollPosition.forward(resumeFrom), Limit.unlimited() });
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class,
+					ScrollPosition.class, Limit.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
 
-		assertNotNull(operations.lastCapturedPageRequest);
-		assertEquals(resumeFrom, operations.lastCapturedPageRequest.getLastEvaluatedKey());
+			Map<String, Object> resumeFrom = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_1);
+
+			query.execute(new Object[] { PARTITION_KEY_VALUE, ScrollPosition.forward(resumeFrom), Limit.unlimited() });
+
+			assertAll(() -> assertNotNull(operations.lastCapturedPageRequest),
+					() -> assertEquals(resumeFrom, operations.lastCapturedPageRequest.getLastEvaluatedKey()));
+		}
+
+		@Test
+		@DisplayName("an empty page carrying a cursor is drained until a non-empty page, keeping the window usable")
+		void anEmptyPageCarryingACursorIsDrainedUntilANonEmptyPage() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+
+			Map<String, Object> firstPageCursor = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_1);
+			Map<String, Object> secondPageCursor = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_2);
+			Match match = new Match();
+			match.tournamentId = PARTITION_KEY_VALUE;
+			match.matchId = MATCH_ID_2;
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.<Object> of(), firstPageCursor));
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.<Object> of(match), secondPageCursor));
+
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findWindowByTournamentId", String.class,
+					ScrollPosition.class, Limit.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			Window<?> window = (Window<?>) query
+					.execute(new Object[] { PARTITION_KEY_VALUE, ScrollPosition.keyset(), Limit.of(10) });
+
+			assertAll(
+					() -> assertEquals(2, operations.queryInvocations,
+							"the empty first page must be drained, not surfaced as an unusable empty window"),
+					() -> assertEquals(1, window.size(), "the first non-empty page's content is returned"),
+					() -> assertTrue(window.hasNext(), "the resumed page still had a cursor, so there is a next page"),
+					() -> {
+						ScrollPosition next = window.positionAt(window.size() - 1);
+						assertTrue(next instanceof KeysetScrollPosition);
+						assertEquals(secondPageCursor, ((KeysetScrollPosition) next).getKeys());
+					}, () -> assertEquals(firstPageCursor, operations.lastCapturedPageRequest.getLastEvaluatedKey(),
+							"the drained page's cursor becomes the exclusive start key of the resumed request"));
+		}
 	}
 }

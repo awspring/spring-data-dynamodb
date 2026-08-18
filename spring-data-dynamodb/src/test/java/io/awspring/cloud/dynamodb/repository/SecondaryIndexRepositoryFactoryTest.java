@@ -31,10 +31,15 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.repository.support.DynamoDbEntityInformation;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.context.MappingContext;
 
-public class SecondaryIndexRepositoryFactoryTest {
+@DisplayName("SecondaryIndexRepositoryFactory")
+class SecondaryIndexRepositoryFactoryTest {
+
+	private static final String TABLE_NAME = "orders";
 
 	static class MatchesByRoundView {
 		String round;
@@ -44,7 +49,7 @@ public class SecondaryIndexRepositoryFactoryTest {
 	interface MatchesByRoundRepository extends SecondaryIndexRepository<MatchesByRoundView> {
 	}
 
-	@Table(tableName = "orders")
+	@Table(tableName = TABLE_NAME)
 	static class Match {
 		@PartitionKey
 		String id;
@@ -56,8 +61,9 @@ public class SecondaryIndexRepositoryFactoryTest {
 	interface MatchRepository extends DynamoDbRepository<Match, String> {
 	}
 
+	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private static <M extends DynamoDbPersistentEntity<?>> void stubMappingContext(DynamoDbConverter converter,
-                                                                                   MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
+			MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
 		when(converter.getMappingContext()).thenReturn((MappingContext) mappingContext);
 	}
 
@@ -70,40 +76,66 @@ public class SecondaryIndexRepositoryFactoryTest {
 		return new DynamoDbRepositoryFactory(operations);
 	}
 
-	@Test
-	void factoryBuildsSecondaryIndexViewRepositoryWithoutIdPropertyError() {
-		DynamoDbRepositoryFactory factory = factory();
+	@Nested
+	@DisplayName("SecondaryIndexRepository (view domain type without id)")
+	class SecondaryIndexViewRepositoryTests {
 
-		MatchesByRoundRepository repository = Assertions.assertDoesNotThrow(
-				() -> factory.getRepository(MatchesByRoundRepository.class),
-				"A SecondaryIndexRepository-derived interface must bootstrap despite its view domain "
-						+ "type having no base-table id property");
+		@Test
+		@DisplayName("bootstraps without throwing despite no id property on the view type")
+		void factoryBuildsSecondaryIndexViewRepositoryWithoutIdPropertyError() {
+			// Arrange
+			DynamoDbRepositoryFactory factory = factory();
 
-		assertNotNull(repository);
+			// Act
+			MatchesByRoundRepository repository = Assertions.assertDoesNotThrow(
+					() -> factory.getRepository(MatchesByRoundRepository.class),
+					"A SecondaryIndexRepository-derived interface must bootstrap despite its view domain "
+							+ "type having no base-table id property");
+
+			// Assert
+			assertNotNull(repository);
+		}
+
+		@Test
+		@DisplayName("entity information reports no id attribute and Void id type")
+		void viewEntityInformationHasNoIdAndReportsVoidIdType() {
+			// Arrange
+			DynamoDbRepositoryFactory factory = factory();
+
+			// Act
+			DynamoDbEntityInformation<MatchesByRoundView, Object> info = factory
+					.getEntityInformation(MatchesByRoundView.class, false);
+
+			// Assert
+			Assertions.assertAll(() -> assertNull(info.getIdAttribute(), "A view domain type has no id attribute"),
+					() -> assertEquals(Void.class, info.getIdType(), "An id-less view reports Void as its id type"),
+					() -> assertNotNull(info.getTableName()));
+		}
 	}
 
-	@Test
-	void viewEntityInformationHasNoIdAndReportsVoidIdType() {
-		DynamoDbRepositoryFactory factory = factory();
+	@Nested
+	@DisplayName("Normal DynamoDbRepository (base-table entity with id)")
+	class NormalRepositoryTests {
 
-		DynamoDbEntityInformation<MatchesByRoundView, Object> info = factory
-				.getEntityInformation(MatchesByRoundView.class);
+		@Test
+		@DisplayName("bootstraps and reports id attribute and type correctly")
+		void normalRepositoryStillBuildsAndReportsIdAttribute() {
+			// Arrange
+			DynamoDbRepositoryFactory factory = factory();
 
-		assertNull(info.getIdAttribute(), "A view domain type has no id attribute");
-		assertEquals(Void.class, info.getIdType(), "An id-less view reports Void as its id type");
-		assertNotNull(info.getTableName());
-	}
+			// Act
+			MatchRepository repository = Assertions.assertDoesNotThrow(
+					() -> factory.getRepository(MatchRepository.class), "A normal DynamoDbRepository must still build");
 
-	@Test
-	void normalRepositoryStillBuildsAndReportsIdAttribute() {
-		DynamoDbRepositoryFactory factory = factory();
+			// Assert
+			assertNotNull(repository);
 
-		MatchRepository repository = Assertions.assertDoesNotThrow(() -> factory.getRepository(MatchRepository.class),
-				"A normal DynamoDbRepository must still build");
-		assertNotNull(repository);
-
-		DynamoDbEntityInformation<Match, Object> info = factory.getEntityInformation(Match.class);
-		assertEquals("id", info.getIdAttribute(), "A base-table entity still reports its id attribute");
-		assertEquals(String.class, info.getIdType(), "A base-table entity still reports its scalar id type");
+			DynamoDbEntityInformation<Match, Object> info = factory.getEntityInformation(Match.class, false);
+			Assertions.assertAll(
+					() -> assertEquals("id", info.getIdAttribute(),
+							"A base-table entity still reports its id attribute"),
+					() -> assertEquals(String.class, info.getIdType(),
+							"A base-table entity still reports its scalar id type"));
+		}
 	}
 }

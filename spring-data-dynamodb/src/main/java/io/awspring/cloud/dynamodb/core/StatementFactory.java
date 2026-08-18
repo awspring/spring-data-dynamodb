@@ -17,7 +17,6 @@ package io.awspring.cloud.dynamodb.core;
 
 import io.awspring.cloud.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
-import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.cloud.dynamodb.request.*;
 import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbPageRequest;
@@ -34,6 +33,10 @@ import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class StatementFactory {
 
 	private final DynamoDbConverter dynamoDbConverter;
@@ -93,7 +96,16 @@ public class StatementFactory {
 		return PutRequest.builder().item(object).build();
 	}
 
-	public DeleteItemRequest delete(Object objectToDelete, DynamoDbPersistentEntity persistenceEntity,
+	public WriteRequest writeRequestForBatchPut(Object objectToInsert, DynamoDbPersistentEntity<?> persistentEntity) {
+		return WriteRequest.builder().putRequest(insertAll(objectToInsert, persistentEntity)).build();
+	}
+
+	public BatchWriteItemRequest batchWrite(Map<String, List<WriteRequest>> requestItems) {
+		Assert.notNull(requestItems, "RequestItems must not be null");
+		return BatchWriteItemRequest.builder().requestItems(requestItems).build();
+	}
+
+	public DeleteItemRequest delete(Object objectToDelete, DynamoDbPersistentEntity<?> persistenceEntity,
 			String tableName) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(objectToDelete, "Object to delete must not be null");
@@ -101,7 +113,7 @@ public class StatementFactory {
 		rejectIfSecondaryIndexView(persistenceEntity, "DeleteItem");
 
 		Map<String, AttributeValue> keys = new LinkedHashMap<>();
-		dynamoDbConverter.delete(objectToDelete, keys, persistenceEntity);
+		dynamoDbConverter.writeKeyFromEntity(objectToDelete, keys, persistenceEntity);
 
 		return DeleteItemRequest.builder().tableName(tableName).key(keys).build();
 	}
@@ -117,8 +129,9 @@ public class StatementFactory {
 		Map<String, AttributeValue> keysToBeUsed = new LinkedHashMap<>(2);
 		keysToBeUsed.put(requiredPersistentEntity.getIdProperty().getColumnName(),
 				dynamoDbConverter.convertToDynamoDbType(partitionKey, requiredPersistentEntity));
-		if (sortKey != null) {
-			keysToBeUsed.put(requiredPersistentEntity.getKeySchema().singleSortKey().getColumnName(),
+		var sortKeyProperty = requiredPersistentEntity.getKeySchema().singleSortKey();
+		if (sortKey != null && sortKeyProperty != null) {
+			keysToBeUsed.put(sortKeyProperty.getColumnName(),
 					dynamoDbConverter.convertToDynamoDbType(sortKey, requiredPersistentEntity));
 		}
 		DeleteItemRequest.Builder deleteItemRequestBuilder = DeleteItemRequest.builder().tableName(tableName)
@@ -147,7 +160,7 @@ public class StatementFactory {
 		Assert.notNull(entity, "DynamoDbPersistentEntity must not be null");
 		rejectIfSecondaryIndexView(entity, "GetItem (findById)");
 		Map<String, AttributeValue> keys = new LinkedHashMap<>();
-		dynamoDbConverter.findByKey(key, keys, entity);
+		dynamoDbConverter.writeKey(key, keys, entity);
 		return GetItemRequest.builder().tableName(tableName).consistentRead(consistentRead).key(keys).build();
 	}
 
@@ -179,7 +192,7 @@ public class StatementFactory {
 		rejectIfSecondaryIndexView(entity, "GetItem (findById)");
 		Map<String, AttributeValue> keys = new LinkedHashMap<>();
 
-		dynamoDbConverter.findByKeys(partitionKey, sortKey, keys, entity);
+		dynamoDbConverter.writeKey(partitionKey, sortKey, keys, entity);
 		return GetItemRequest.builder().tableName(tableName).consistentRead(consistentRead).key(keys).build();
 	}
 
@@ -192,10 +205,10 @@ public class StatementFactory {
 
 		Map<String, AttributeValue> keys = new LinkedHashMap<>();
 		if (sortKey != null) {
-			dynamoDbConverter.findByKeys(partitionKey, sortKey, keys, entity);
+			dynamoDbConverter.writeKey(partitionKey, sortKey, keys, entity);
 		}
 		else {
-			dynamoDbConverter.findByKey(partitionKey, keys, entity);
+			dynamoDbConverter.writeKey(partitionKey, keys, entity);
 		}
 
 		String partitionColumn = entity.getIdProperty().getColumnName();
@@ -257,11 +270,19 @@ public class StatementFactory {
 		return builder.build();
 	}
 
-	public QueryRequest query(String tableName, DynamoDbPersistentEntity entity, DynamoDbQueryRequest qr,
+	public QueryRequest query(String tableName, DynamoDbPersistentEntity<?> entity, DynamoDbQueryRequest qr,
 			DynamoDbPageRequest dynamoDBPageRequest) {
+		return query(tableName, entity, qr, dynamoDBPageRequest, qr.getIndexName());
+	}
+
+	public QueryRequest query(String tableName, DynamoDbPersistentEntity<?> entity, DynamoDbQueryRequest qr,
+			DynamoDbPageRequest dynamoDBPageRequest, String indexName) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(qr, "DynamoDBQueryRequest must not be null");
 		Assert.notNull(entity, "DynamoDbPersistentEntity must not be null");
+		if (StringUtils.hasText(qr.getIndexName())) {
+			indexName = qr.getIndexName();
+		}
 
 		QueryRequest.Builder queryRequestBuilder = QueryRequest.builder().select(Select.ALL_ATTRIBUTES);
 		if (dynamoDBPageRequest != null) {
@@ -291,8 +312,8 @@ public class StatementFactory {
 			});
 			queryRequestBuilder.expressionAttributeValues(mapOfExpressionAttributeValues);
 		}
-		if (StringUtils.hasLength(qr.getIndexName())) {
-			queryRequestBuilder.indexName(qr.getIndexName());
+		if (StringUtils.hasLength(indexName)) {
+			queryRequestBuilder.indexName(indexName);
 		}
 		if (StringUtils.hasLength(qr.getKeyConditionExpression())) {
 			queryRequestBuilder.keyConditionExpression(qr.getKeyConditionExpression());
@@ -304,7 +325,7 @@ public class StatementFactory {
 	}
 
 	public UpdateItemRequest update(Object partitionKey, @Nullable Object sortKey,
-			DynamoDbUpdateExpressionRequest request, String tableName, DynamoDbPersistentEntity entity) {
+			DynamoDbUpdateExpressionRequest request, String tableName, DynamoDbPersistentEntity<?> entity) {
 		Assert.notNull(tableName, "TableName must not be null");
 		Assert.notNull(partitionKey, "Partition Key must not be null");
 		Assert.notNull(entity, "DynamoDbPersistentEntity must not be null");
@@ -312,7 +333,7 @@ public class StatementFactory {
 		rejectIfSecondaryIndexView(entity, "UpdateItem");
 
 		Map<String, AttributeValue> keysToBeUsed = new HashMap<>(2);
-		keysToBeUsed.put(((DynamoDbPersistentProperty) entity.getIdProperty()).getColumnName(),
+		keysToBeUsed.put(entity.getIdProperty().getColumnName(),
 				dynamoDbConverter.convertToDynamoDbType(partitionKey, entity));
 		var sortKeyProperty = entity.getKeySchema().singleSortKey();
 		if (sortKeyProperty != null) {

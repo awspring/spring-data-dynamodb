@@ -25,6 +25,10 @@ import org.springframework.data.convert.EntityReader;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface DynamoDbConverter extends
 		EntityConverter<DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty, Object, Map<String, AttributeValue>>,
 		DynamoDbWriter<Object>, EntityReader<Object, Map<String, AttributeValue>> {
@@ -36,13 +40,13 @@ public interface DynamoDbConverter extends
 
 	void write(Object objectToInsert, Map<String, AttributeValue> items, DynamoDbPersistentEntity<?> persistentEntity);
 
-	void delete(Object objectToDelete, Map<String, AttributeValue> object,
-			DynamoDbPersistentEntity<?> persistenceEntity);
+	void writeKeyFromEntity(Object entity, Map<String, AttributeValue> keys,
+			DynamoDbPersistentEntity<?> persistentEntity);
 
-	void findByKey(Object key, Map<String, AttributeValue> keys, DynamoDbPersistentEntity<?> persistenceEntity);
+	void writeKey(Object partitionKey, Map<String, AttributeValue> keys, DynamoDbPersistentEntity<?> persistentEntity);
 
-	void findByKeys(Object partitionKey, @Nullable Object sortKey, Map<String, AttributeValue> keys,
-			DynamoDbPersistentEntity<?> persistenceEntity);
+	void writeKey(Object partitionKey, @Nullable Object sortKey, Map<String, AttributeValue> keys,
+			DynamoDbPersistentEntity<?> persistentEntity);
 
 	void update(Object objectToUpdate, Map<String, AttributeValue> keys, DynamoDbPersistentEntity<?> entity,
 			Map<String, AttributeValueUpdate> values);

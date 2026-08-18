@@ -19,6 +19,10 @@ import io.awspring.cloud.dynamodb.core.mapping.InnerClass;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "playerCard")
 public class PlayerCard {
 

@@ -13,11 +13,11 @@ the API keeps DynamoDB's `(partition key, sort key)` modeling explicit rather th
 - [Reference Guide](src/main/content/reference.md) — the complete guide, covering:
   - Getting started (dependencies, configuration, table creation)
   - Mapping entities (`@Table`, `@PartitionKey`, `@SortKey`, `@Column`, `@Version`, `@InnerClass`,
-    `@SortKeyTemplate`, discriminators)
+    `@SortKeyTemplate`, `@AggregateTable`, discriminators)
   - Secondary index views (typed and polymorphic, multi-attribute keys, LSIs)
-  - Repositories (`DynamoDbRepository`, composite ids, `SecondaryIndexRepository`, derived queries,
-    `@AllowScan`, `findFirst`/`findTop`, pagination)
-  - `@Query` — explicit PartiQL expressions
+  - Repositories (`DynamoDbRepository`, composite ids, `SecondaryIndexRepository`,
+    `AggregateRepository`, derived queries, `@AllowScan`, `findFirst`/`findTop`, pagination)
+  - `@Query` — explicit key conditions, filter expressions, `@Modifying` updates, and PartiQL
 
 ## Building the docs
 

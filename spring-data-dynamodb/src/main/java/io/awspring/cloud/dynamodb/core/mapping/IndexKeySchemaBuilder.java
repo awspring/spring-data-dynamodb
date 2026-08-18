@@ -19,18 +19,17 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 class IndexKeySchemaBuilder {
 
 	private record Entry(int order, DynamoDbPersistentProperty property) {
 	}
 
-	private final String indexName;
 	private final List<Entry> partitions = new ArrayList<>();
 	private final List<Entry> sorts = new ArrayList<>();
-
-	IndexKeySchemaBuilder(String indexName) {
-		this.indexName = indexName;
-	}
 
 	void add(KeyRole role, DynamoDbPersistentProperty property) {
 		Entry entry = new Entry(role.order(), property);
@@ -43,16 +42,10 @@ class IndexKeySchemaBuilder {
 	}
 
 	IndexKeySchema build() {
-		return new IndexKeySchema(indexName, ordered(partitions), ordered(sorts));
+		return new IndexKeySchema(ordered(partitions), ordered(sorts));
 	}
 
 	private static List<DynamoDbPersistentProperty> ordered(List<Entry> entries) {
-		List<Entry> copy = new ArrayList<>(entries);
-		copy.sort(Comparator.comparingInt(Entry::order));
-		List<DynamoDbPersistentProperty> result = new ArrayList<>(copy.size());
-		for (Entry entry : copy) {
-			result.add(entry.property());
-		}
-		return result;
+		return entries.stream().sorted(Comparator.comparingInt(Entry::order)).map(Entry::property).toList();
 	}
 }

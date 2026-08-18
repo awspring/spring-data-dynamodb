@@ -29,6 +29,10 @@ import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.repository.query.ParameterAccessor;
 import org.springframework.data.repository.query.parser.PartTree;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class PartTreeDynamoDbQuery extends AbstractDynamoDbQuery {
 
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;

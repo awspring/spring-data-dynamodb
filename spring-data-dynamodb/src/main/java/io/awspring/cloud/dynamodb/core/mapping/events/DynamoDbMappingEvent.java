@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.core.mapping.events;
 
 import org.springframework.context.ApplicationEvent;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbMappingEvent<T> extends ApplicationEvent {
 	private final String tableName;
 

@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.request;
 
 import java.util.Map;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbQueryRequest {
 
 	private String filterExpression;
@@ -53,6 +57,10 @@ public class DynamoDbQueryRequest {
 
 	public Boolean getConsistentRead() {
 		return consistentRead;
+	}
+
+	public static Builder request() {
+		return new Builder();
 	}
 
 	public static final class Builder {

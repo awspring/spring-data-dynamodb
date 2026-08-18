@@ -15,10 +15,14 @@
  */
 package io.awspring.cloud.dynamodb.core;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.awspring.cloud.dynamodb.core.converter.MappingDynamoDbConverter;
@@ -30,23 +34,30 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.PutItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 
+@DisplayName("DynamoDbTemplate -- @SecondaryIndex view read-path behaviour")
 class SecondaryIndexViewReadPathTest {
+
+	private static final String INDEX_NAME = "by_status";
+	private static final String BASE_TABLE = "arena";
 
 	private DynamoDbClient mockClient;
 	private DynamoDbTemplate template;
 
-	@Table(tableName = "arena")
+	@Table(tableName = BASE_TABLE)
 	static class ShopRow {
 		@PartitionKey
 		String pk;
@@ -54,7 +65,7 @@ class SecondaryIndexViewReadPathTest {
 		String sk;
 	}
 
-	@SecondaryIndex("by_status")
+	@SecondaryIndex(INDEX_NAME)
 	static class MatchesByRound {
 		@PartitionKey
 		String round;
@@ -74,78 +85,90 @@ class SecondaryIndexViewReadPathTest {
 	}
 
 	@Test
-	void queryOnAViewAutoSeedsItsIndexNameAndResolvedTableName() {
+	@DisplayName("query on a view auto-seeds its index name and resolved table name")
+	void queryOnView_autoSeedsIndexAndResolvedTableName() {
 		when(mockClient.query(any(QueryRequest.class))).thenReturn(QueryResponse.builder().items(List.of()).build());
 
-		template.query(MatchesByRound.class, "by_status").partition("round", "QUARTERFINAL").execute();
+		template.query(MatchesByRound.class, INDEX_NAME).partition("round", "QUARTERFINAL").execute();
 
 		ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
-		org.mockito.Mockito.verify(mockClient).query(captor.capture());
-		assertThat(captor.getValue().indexName()).isEqualTo("by_status");
-		assertThat(captor.getValue().tableName()).isEqualTo("arena");
+		verify(mockClient).query(captor.capture());
+		assertAll(() -> assertEquals(INDEX_NAME, captor.getValue().indexName()),
+				() -> assertEquals(BASE_TABLE, captor.getValue().tableName()));
 	}
 
 	@Test
-	void findAllOnAViewScansItsOwnIndexNotTheBaseTable() {
+	@DisplayName("findAll on a view scans its own index, not the base table")
+	void findAllOnView_scansOwnIndex() {
 		when(mockClient.scan(any(ScanRequest.class))).thenReturn(ScanResponse.builder().items(List.of()).build());
 
 		template.findAll(MatchesByRound.class);
 
 		ArgumentCaptor<ScanRequest> captor = ArgumentCaptor.forClass(ScanRequest.class);
-		org.mockito.Mockito.verify(mockClient).scan(captor.capture());
-		assertThat(captor.getValue().indexName()).isEqualTo("by_status");
-		assertThat(captor.getValue().tableName()).isEqualTo("arena");
+		verify(mockClient).scan(captor.capture());
+		assertAll(() -> assertEquals(INDEX_NAME, captor.getValue().indexName()),
+				() -> assertEquals(BASE_TABLE, captor.getValue().tableName()));
 	}
 
 	@Test
-	void saveOnAViewIsRejected() {
+	@DisplayName("save on a view is rejected as read-only")
+	void saveOnView_isRejected() {
 		MatchesByRound view = new MatchesByRound();
 		view.round = "QUARTERFINAL";
 		view.createdAt = "2026-01-01";
 
-		assertThatThrownBy(() -> template.save(view)).isInstanceOf(InvalidDataAccessApiUsageException.class)
-				.hasMessageContaining("by_status").hasMessageContaining("read-only");
-		org.mockito.Mockito.verifyNoInteractions(mockClient);
+		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> template.save(view));
+
+		assertAll(() -> assertTrue(ex.getMessage().contains(INDEX_NAME)),
+				() -> assertTrue(ex.getMessage().contains("read-only")));
+		verifyNoInteractions(mockClient);
 	}
 
 	@Test
-	void insertOnAViewIsRejected() {
+	@DisplayName("insert on a view is rejected")
+	void insertOnView_isRejected() {
 		MatchesByRound view = new MatchesByRound();
 		view.round = "QUARTERFINAL";
 
-		assertThatThrownBy(() -> template.insert(view)).isInstanceOf(InvalidDataAccessApiUsageException.class);
-		org.mockito.Mockito.verifyNoInteractions(mockClient);
+		assertThrows(InvalidDataAccessApiUsageException.class, () -> template.insert(view));
+		verifyNoInteractions(mockClient);
 	}
 
 	@Test
-	void deleteOnAViewIsRejected() {
+	@DisplayName("delete on a view is rejected")
+	void deleteOnView_isRejected() {
 		MatchesByRound view = new MatchesByRound();
 		view.round = "QUARTERFINAL";
 
-		assertThatThrownBy(() -> template.delete(view)).isInstanceOf(InvalidDataAccessApiUsageException.class);
-		org.mockito.Mockito.verifyNoInteractions(mockClient);
+		assertThrows(InvalidDataAccessApiUsageException.class, () -> template.delete(view));
+		verifyNoInteractions(mockClient);
 	}
 
 	@Test
-	void findByIdOnAViewIsRejected() {
-		assertThatThrownBy(() -> template.findById("QUARTERFINAL", MatchesByRound.class))
-				.isInstanceOf(InvalidDataAccessApiUsageException.class).hasMessageContaining("GetItem");
-		org.mockito.Mockito.verifyNoInteractions(mockClient);
+	@DisplayName("findById on a view is rejected (no GetItem)")
+	void findByIdOnView_isRejected() {
+		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> template.findById("QUARTERFINAL", MatchesByRound.class));
+
+		assertTrue(ex.getMessage().contains("GetItem"));
+		verifyNoInteractions(mockClient);
 	}
 
 	@Test
-	void updateOnAViewIsRejected() {
+	@DisplayName("update on a view is rejected")
+	void updateOnView_isRejected() {
 		MatchesByRound view = new MatchesByRound();
 		view.round = "QUARTERFINAL";
 
-		assertThatThrownBy(() -> template.update(view)).isInstanceOf(InvalidDataAccessApiUsageException.class);
-		org.mockito.Mockito.verifyNoInteractions(mockClient);
+		assertThrows(InvalidDataAccessApiUsageException.class, () -> template.update(view));
+		verifyNoInteractions(mockClient);
 	}
 
 	@Test
-	void normalBaseTableWritesAndReadsAreUnaffected() {
-		when(mockClient.putItem(any(software.amazon.awssdk.services.dynamodb.model.PutItemRequest.class)))
-				.thenReturn(software.amazon.awssdk.services.dynamodb.model.PutItemResponse.builder().build());
+	@DisplayName("normal base-table writes and reads are unaffected")
+	void baseTableReadWrite_isUnaffected() {
+		when(mockClient.putItem(any(PutItemRequest.class))).thenReturn(PutItemResponse.builder().build());
 		when(mockClient.getItem(any(GetItemRequest.class)))
 				.thenReturn(GetItemResponse.builder().item(Map.of()).build());
 

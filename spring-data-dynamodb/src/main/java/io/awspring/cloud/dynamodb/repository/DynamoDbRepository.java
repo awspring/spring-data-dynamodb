@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.repository;
 import org.springframework.data.repository.ListCrudRepository;
 import org.springframework.data.repository.NoRepositoryBean;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @NoRepositoryBean
 public interface DynamoDbRepository<T, ID> extends ListCrudRepository<T, ID> {
 

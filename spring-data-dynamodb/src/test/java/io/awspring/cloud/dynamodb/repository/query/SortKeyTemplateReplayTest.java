@@ -15,6 +15,8 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,7 +28,8 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.lang.reflect.Method;
 import java.util.List;
-import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -34,10 +37,21 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
 
-public class SortKeyTemplateReplayTest {
+@DisplayName("SortKeyTemplate replay through PartTreeDynamoDbQuery")
+class SortKeyTemplateReplayTest {
 
-	@Table(tableName = "orders")
-	@SortKeyTemplate("MATCH#{year}#{round}")
+	private static final String TABLE_NAME = "orders";
+	private static final String SORT_KEY_TEMPLATE = "MATCH#{year}#{round}";
+	private static final String PARTITION_KEY = "cust-1";
+	private static final int YEAR = 2024;
+	private static final String ROUND = "QUARTERFINAL";
+	private static final String EXPECTED_PREFIX = "MATCH#2024#";
+	private static final String EXPECTED_FULL_KEY = "MATCH#2024#QUARTERFINAL";
+	private static final String EXPECTED_BEGINS_WITH_EXPR = "#tk0 = :tk0 AND begins_with(#tk1, :tk1)";
+	private static final String EXPECTED_EQ_EXPR = "#tk0 = :tk0 AND #tk1 = :tk1";
+
+	@Table(tableName = TABLE_NAME)
+	@SortKeyTemplate(SORT_KEY_TEMPLATE)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -72,75 +86,104 @@ public class SortKeyTemplateReplayTest {
 		return new PartTreeDynamoDbQueryReplayTest.CapturingOperations(converter);
 	}
 
-	@Test
-	void leadingPlaceholderSubsetReplaysAsABeginsWithKeyConditionWithoutThrowing() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYear", String.class, int.class);
+	@Nested
+	@DisplayName("Leading placeholder subset (begins_with)")
+	class BeginsWithTests {
 
-		query.execute(new Object[] { "cust-1", 2024 });
+		@Test
+		@DisplayName("replays as a begins_with key condition without throwing")
+		void leadingPlaceholderSubsetReplaysAsABeginsWithKeyConditionWithoutThrowing() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYear", String.class, int.class);
 
-		assertNotNull(operations.lastCapturedRequest);
-		assertNull(operations.lastCapturedRequest.getIndexName());
-		String keyCondition = operations.lastCapturedRequest.getKeyConditionExpression();
-		assertTrue(keyCondition.contains("begins_with"), "expected begins_with in: " + keyCondition);
-		Assertions.assertTrue(operations.lastCapturedRequest.getExpressionAttributeValues().containsValue("cust-1"));
-		Assertions
-				.assertTrue(operations.lastCapturedRequest.getExpressionAttributeValues().containsValue("MATCH#2024#"));
+			// Act
+			query.execute(new Object[] { PARTITION_KEY, YEAR });
+
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertNull(operations.lastCapturedRequest.getIndexName()),
+					() -> assertTrue(
+							operations.lastCapturedRequest.getKeyConditionExpression().contains("begins_with")),
+					() -> assertTrue(
+							operations.lastCapturedRequest.getExpressionAttributeValues().containsValue(PARTITION_KEY)),
+					() -> assertTrue(operations.lastCapturedRequest.getExpressionAttributeValues()
+							.containsValue(EXPECTED_PREFIX)));
+		}
+
+		@Test
+		@DisplayName("has exactly the syntax real DynamoDB accepts")
+		void beginsWithKeyConditionHasExactlyTheSyntaxRealDynamoDbAccepts() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYear", String.class, int.class);
+
+			// Act
+			query.execute(new Object[] { PARTITION_KEY, YEAR });
+
+			// Assert
+			assertEquals(EXPECTED_BEGINS_WITH_EXPR, operations.lastCapturedRequest.getKeyConditionExpression());
+		}
 	}
 
-	@Test
-	void allPlaceholdersBoundReplaysAsAnExactEqKeyCondition() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYearAndRound", String.class, int.class,
-				String.class);
+	@Nested
+	@DisplayName("All placeholders bound (exact EQ)")
+	class ExactEqTests {
 
-		query.execute(new Object[] { "cust-1", 2024, "QUARTERFINAL" });
+		@Test
+		@DisplayName("replays as an exact EQ key condition")
+		void allPlaceholdersBoundReplaysAsAnExactEqKeyCondition() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYearAndRound", String.class,
+					int.class, String.class);
 
-		assertNotNull(operations.lastCapturedRequest);
-		String keyCondition = operations.lastCapturedRequest.getKeyConditionExpression();
-		assertTrue(keyCondition.contains("="), "expected an equality clause in: " + keyCondition);
-		assertTrue(keyCondition.contains("AND"), "expected partition AND sort clauses in: " + keyCondition);
-		Assertions.assertTrue(
-				operations.lastCapturedRequest.getExpressionAttributeValues().containsValue("MATCH#2024#QUARTERFINAL"));
+			// Act
+			query.execute(new Object[] { PARTITION_KEY, YEAR, ROUND });
+
+			// Assert
+			String keyCondition = operations.lastCapturedRequest.getKeyConditionExpression();
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest), () -> assertTrue(keyCondition.contains("=")),
+					() -> assertTrue(keyCondition.contains("AND")), () -> assertTrue(operations.lastCapturedRequest
+							.getExpressionAttributeValues().containsValue(EXPECTED_FULL_KEY)));
+		}
+
+		@Test
+		@DisplayName("has exactly the syntax real DynamoDB accepts")
+		void fullyBoundEqKeyConditionHasExactlyTheSyntaxRealDynamoDbAccepts() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYearAndRound", String.class,
+					int.class, String.class);
+
+			// Act
+			query.execute(new Object[] { PARTITION_KEY, YEAR, ROUND });
+
+			// Assert
+			assertEquals(EXPECTED_EQ_EXPR, operations.lastCapturedRequest.getKeyConditionExpression());
+		}
 	}
 
-	@Test
-	void beginsWithKeyConditionHasExactlyTheSyntaxRealDynamoDbAccepts() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYear", String.class, int.class);
+	@Nested
+	@DisplayName("Partition key alone (no sort condition)")
+	class PartitionOnlyTests {
 
-		query.execute(new Object[] { "cust-1", 2024 });
+		@Test
+		@DisplayName("replays with no sort condition at all")
+		void partitionKeyAloneReplaysWithNoSortConditionAtAll() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentId", String.class);
 
-		Assertions.assertEquals("#tk0 = :tk0 AND begins_with(#tk1, :tk1)",
-				operations.lastCapturedRequest.getKeyConditionExpression());
-	}
+			// Act
+			query.execute(new Object[] { PARTITION_KEY });
 
-	@Test
-	void fullyBoundEqKeyConditionHasExactlyTheSyntaxRealDynamoDbAccepts() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentIdAndYearAndRound", String.class, int.class,
-				String.class);
-
-		query.execute(new Object[] { "cust-1", 2024, "QUARTERFINAL" });
-
-		Assertions.assertEquals("#tk0 = :tk0 AND #tk1 = :tk1",
-				operations.lastCapturedRequest.getKeyConditionExpression());
-	}
-
-	@Test
-	void partitionKeyAloneReplaysWithNoSortConditionAtAll() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		PartTreeDynamoDbQuery query = queryFor(operations, "findByTournamentId", String.class);
-
-		query.execute(new Object[] { "cust-1" });
-
-		assertNotNull(operations.lastCapturedRequest);
-		String keyCondition = operations.lastCapturedRequest.getKeyConditionExpression();
-		assertFalseContainsSortColumn(keyCondition);
-		Assertions.assertEquals(1, operations.lastCapturedRequest.getExpressionAttributeValues().size());
-	}
-
-	private static void assertFalseContainsSortColumn(String keyCondition) {
-		assertTrue(!keyCondition.contains("begins_with"), "did not expect a sort condition in: " + keyCondition);
+			// Assert
+			String keyCondition = operations.lastCapturedRequest.getKeyConditionExpression();
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertTrue(!keyCondition.contains("begins_with"),
+							"did not expect a sort condition in: " + keyCondition),
+					() -> assertEquals(1, operations.lastCapturedRequest.getExpressionAttributeValues().size()));
+		}
 	}
 }

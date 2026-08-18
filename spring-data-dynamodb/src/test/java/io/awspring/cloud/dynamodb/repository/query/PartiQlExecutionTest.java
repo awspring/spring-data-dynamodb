@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -27,6 +28,8 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.repository.Query;
 import java.lang.reflect.Method;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -36,9 +39,17 @@ import org.springframework.data.repository.core.support.DefaultRepositoryMetadat
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-public class PartiQlExecutionTest {
+@DisplayName("PartiQL execution")
+class PartiQlExecutionTest {
 
-	@Table(tableName = "orders")
+	private static final String TABLE_NAME = "orders";
+	private static final String STATEMENT_SINGLE = "SELECT * FROM orders WHERE tournamentId = ?";
+	private static final String STATEMENT_DOUBLE = "SELECT * FROM orders WHERE tournamentId = ? AND round = ?";
+	private static final String PK_CUST_1 = "cust-1";
+	private static final String PK_CUST_7 = "cust-7";
+	private static final String ROUND_QUARTERFINAL = "QUARTERFINAL";
+
+	@Table(tableName = TABLE_NAME)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -49,13 +60,13 @@ public class PartiQlExecutionTest {
 
 	interface MatchRepository extends Repository<Match, String> {
 
-		@Query(partiQl = "SELECT * FROM orders WHERE tournamentId = ?")
+		@Query(partiQl = STATEMENT_SINGLE)
 		List<Match> byTournament(@Param("tournamentId") String tournamentId);
 
-		@Query(partiQl = "SELECT * FROM orders WHERE tournamentId = ? AND round = ?")
+		@Query(partiQl = STATEMENT_DOUBLE)
 		List<Match> byTournamentAndRound(@Param("tournamentId") String tournamentId, @Param("round") String round);
 
-		@Query(partiQl = "SELECT * FROM orders WHERE tournamentId = ?", consistentRead = true)
+		@Query(partiQl = STATEMENT_SINGLE, consistentRead = true)
 		List<Match> byCustomerConsistent(@Param("tournamentId") String tournamentId);
 	}
 
@@ -78,56 +89,82 @@ public class PartiQlExecutionTest {
 		return new StringBasedDynamoDbQuery(queryMethod, operations, ValueExpressionDelegate.create());
 	}
 
-	@Test
-	void singlePositionalParameterBindsInOrder() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "byTournament", String.class);
+	@Nested
+	@DisplayName("Positional parameter binding")
+	class ParameterBindingTests {
 
-		query.execute(new Object[] { "cust-1" });
+		@Test
+		@DisplayName("single positional parameter binds in order")
+		void singlePositionalParameterBindsInOrder() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "byTournament", String.class);
 
-		assertEquals("SELECT * FROM orders WHERE tournamentId = ?", operations.lastStatement);
-		assertNotNull(operations.lastStatementValues);
-		assertEquals(List.of("cust-1"), operations.lastStatementValues);
+			// Act
+			query.execute(new Object[] { PK_CUST_1 });
+
+			// Assert
+			assertAll(() -> assertEquals(STATEMENT_SINGLE, operations.lastStatement),
+					() -> assertNotNull(operations.lastStatementValues),
+					() -> assertEquals(List.of(PK_CUST_1), operations.lastStatementValues));
+		}
+
+		@Test
+		@DisplayName("two positional parameters bind in declaration order")
+		void twoPositionalParametersBindInDeclarationOrder() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "byTournamentAndRound", String.class, String.class);
+
+			// Act
+			query.execute(new Object[] { PK_CUST_7, ROUND_QUARTERFINAL });
+
+			// Assert
+			assertAll(() -> assertEquals(STATEMENT_DOUBLE, operations.lastStatement),
+					() -> assertNotNull(operations.lastStatementValues),
+					() -> assertEquals(List.of(PK_CUST_7, ROUND_QUARTERFINAL), operations.lastStatementValues));
+		}
 	}
 
-	@Test
-	void twoPositionalParametersBindInDeclarationOrder() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "byTournamentAndRound", String.class, String.class);
+	@Nested
+	@DisplayName("Consistent read and result handling")
+	class ConsistentReadAndResultTests {
 
-		query.execute(new Object[] { "cust-7", "QUARTERFINAL" });
+		@Test
+		@DisplayName("consistentRead flows through to the statement execution")
+		void consistentReadFlowsThrough() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
 
-		assertEquals("SELECT * FROM orders WHERE tournamentId = ? AND round = ?", operations.lastStatement);
-		assertNotNull(operations.lastStatementValues);
-		assertEquals(List.of("cust-7", "QUARTERFINAL"), operations.lastStatementValues);
-	}
+			// Act & Assert - consistent
+			StringBasedDynamoDbQuery consistent = queryFor(operations, "byCustomerConsistent", String.class);
+			consistent.execute(new Object[] { PK_CUST_1 });
+			assertEquals(Boolean.TRUE, operations.lastStatementConsistentRead);
 
-	@Test
-	void consistentReadFlowsThrough() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			// Act & Assert - not consistent
+			StringBasedDynamoDbQuery notConsistent = queryFor(operations, "byTournament", String.class);
+			notConsistent.execute(new Object[] { PK_CUST_1 });
+			assertEquals(Boolean.FALSE, operations.lastStatementConsistentRead);
+		}
 
-		StringBasedDynamoDbQuery consistent = queryFor(operations, "byCustomerConsistent", String.class);
-		consistent.execute(new Object[] { "cust-1" });
-		assertEquals(Boolean.TRUE, operations.lastStatementConsistentRead);
+		@Test
+		@DisplayName("collection result is returned as a list")
+		void collectionResultIsReturnedAsAList() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			Match match = new Match();
+			match.tournamentId = PK_CUST_1;
+			operations.scriptedReadResult = PartTreeDynamoDbQueryReplayTest.EntityReadResultAccess
+					.of(List.<Object> of(match), null);
 
-		StringBasedDynamoDbQuery notConsistent = queryFor(operations, "byTournament", String.class);
-		notConsistent.execute(new Object[] { "cust-1" });
-		assertEquals(Boolean.FALSE, operations.lastStatementConsistentRead);
-	}
+			StringBasedDynamoDbQuery query = queryFor(operations, "byTournament", String.class);
 
-	@Test
-	void collectionResultIsReturnedAsAList() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		Match match = new Match();
-		match.tournamentId = "cust-1";
-		operations.scriptedReadResult = PartTreeDynamoDbQueryReplayTest.EntityReadResultAccess
-				.of(List.<Object> of(match), null);
+			// Act
+			Object result = query.execute(new Object[] { PK_CUST_1 });
 
-		StringBasedDynamoDbQuery query = queryFor(operations, "byTournament", String.class);
-		Object result = query.execute(new Object[] { "cust-1" });
-
-		assertNotNull(result);
-		assertFalse(((List<?>) result).isEmpty());
-		assertEquals(1, ((List<?>) result).size());
+			// Assert
+			assertAll(() -> assertNotNull(result), () -> assertFalse(((List<?>) result).isEmpty()),
+					() -> assertEquals(1, ((List<?>) result).size()));
+		}
 	}
 }

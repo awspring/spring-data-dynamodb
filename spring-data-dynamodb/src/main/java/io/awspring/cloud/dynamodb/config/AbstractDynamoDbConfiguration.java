@@ -34,11 +34,14 @@ import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.convert.CustomConversions;
 import org.springframework.data.convert.PropertyValueConversions;
 import org.springframework.util.Assert;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Configuration
 public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAware, BeanFactoryAware {
 
@@ -46,11 +49,11 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 	private @Nullable BeanFactory beanFactory;
 
 	@Bean
-	public DynamoDbConverter dynamoDbConverter() {
-		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(
-				requireBeanOfType(DynamoDbMappingContext.class));
-		converter.setCustomConversions(requireBeanOfType(DynamoDbConversions.class));
-		converter.setPropertyValueConversions(requireBeanOfType(PropertyValueConversions.class));
+	public DynamoDbConverter dynamoDbConverter(DynamoDbMappingContext dynamoDbMappingContext,
+			DynamoDbConversions dynamoDbConversions, PropertyValueConversions propertyValueConversions) {
+		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(dynamoDbMappingContext);
+		converter.setCustomConversions(dynamoDbConversions);
+		converter.setPropertyValueConversions(propertyValueConversions);
 		converter.afterPropertiesSet();
 
 		return converter;
@@ -75,15 +78,14 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 	}
 
 	@Bean
-	public DynamoDbMappingContext dynamoDbMappingContext() throws ClassNotFoundException {
+	public DynamoDbMappingContext dynamoDbMappingContext(DynamoDbConversions dynamoDbConversions)
+			throws ClassNotFoundException {
 
 		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
 
-		CustomConversions customConversions = requireBeanOfType(DynamoDbConversions.class);
-
 		getBeanClassLoader().ifPresent(mappingContext::setBeanClassLoader);
 		mappingContext.setInitialEntitySet(getInitialEntitySet());
-		mappingContext.setSimpleTypeHolder(customConversions.getSimpleTypeHolder());
+		mappingContext.setSimpleTypeHolder(dynamoDbConversions.getSimpleTypeHolder());
 
 		return mappingContext;
 	}

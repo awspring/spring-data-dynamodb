@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.request;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbPageRequest {
 
 	private Integer limit;

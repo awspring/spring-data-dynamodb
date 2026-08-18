@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,14 +25,25 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.repository.query.DefaultParameters;
 import org.springframework.data.repository.query.ParametersParameterAccessor;
+import org.springframework.data.repository.query.ParametersSource;
 import org.springframework.data.repository.query.parser.PartTree;
 
-public class DynamoDbQueryCreatorOrderByTest {
+@DisplayName("DynamoDbQueryCreator OrderBy handling")
+class DynamoDbQueryCreatorOrderByTest {
 
-	@Table(tableName = "single_sort_key")
+	private static final String TABLE_NAME = "single_sort_key";
+	private static final String PK_VALUE = "pk-1";
+	private static final String ROUND_ACTIVE = "ACTIVE";
+	private static final String PARTITION_KEY = "cust-1";
+	private static final int YEAR = 2024;
+
+	@Table(tableName = TABLE_NAME)
 	static class Entity {
 		@PartitionKey
 		String pk;
@@ -89,10 +101,7 @@ public class DynamoDbQueryCreatorOrderByTest {
 		DynamoDbMappingContext context = newContext(type);
 		PartTree tree = new PartTree(methodName, type);
 		ParametersParameterAccessor accessor = new ParametersParameterAccessor(
-				new org.springframework.data.repository.query.DefaultParameters(
-						org.springframework.data.repository.query.ParametersSource
-								.of(resolveMethod(type, methodName, args))),
-				args);
+				new DefaultParameters(ParametersSource.of(resolveMethod(type, methodName, args))), args);
 		return new DynamoDbQueryCreator(tree, accessor, context, type).createQuery();
 	}
 
@@ -109,49 +118,71 @@ public class DynamoDbQueryCreatorOrderByTest {
 		}
 	}
 
-	@Test
-	void orderByTheSortKeyAscendingSetsScanIndexForwardTrue() {
-		DynamoDbQuerySpec spec = createSpec(Entity.class, "findByPkOrderBySkAsc", "pk-1");
+	@Nested
+	@DisplayName("Valid OrderBy on the sort key")
+	class ValidOrderByTests {
 
-		assertFalse(spec.requiresScan());
-		assertTrue(spec.scanIndexForward());
+		@Test
+		@DisplayName("OrderBy sort key ASC sets scanIndexForward=true")
+		void orderByTheSortKeyAscendingSetsScanIndexForwardTrue() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(Entity.class, "findByPkOrderBySkAsc", PK_VALUE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertTrue(spec.scanIndexForward()));
+		}
+
+		@Test
+		@DisplayName("OrderBy sort key DESC sets scanIndexForward=false")
+		void orderByTheSortKeyDescendingSetsScanIndexForwardFalse() {
+			// Act
+			DynamoDbQuerySpec spec = createSpec(Entity.class, "findByPkOrderBySkDesc", PK_VALUE);
+
+			// Assert
+			assertAll(() -> assertFalse(spec.requiresScan()), () -> assertFalse(spec.scanIndexForward()));
+		}
 	}
 
-	@Test
-	void orderByTheSortKeyDescendingSetsScanIndexForwardFalse() {
-		DynamoDbQuerySpec spec = createSpec(Entity.class, "findByPkOrderBySkDesc", "pk-1");
+	@Nested
+	@DisplayName("Rejected OrderBy scenarios")
+	class RejectedOrderByTests {
 
-		assertFalse(spec.requiresScan());
-		assertFalse(spec.scanIndexForward());
-	}
+		@Test
+		@DisplayName("OrderBy a non-sort-key property throws")
+		void orderByAPropertyThatIsNotTheSortKeyThrows() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> createSpec(Entity.class, "findByPkOrderByRoundAsc", PK_VALUE));
 
-	@Test
-	void orderByAPropertyThatIsNotTheSortKeyThrows() {
-		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> createSpec(Entity.class, "findByPkOrderByRoundAsc", "pk-1"));
-		assertTrue(ex.getMessage().contains("round"));
-		assertTrue(ex.getMessage().contains("sk"));
-	}
+			assertAll(() -> assertTrue(ex.getMessage().contains("round")),
+					() -> assertTrue(ex.getMessage().contains("sk")));
+		}
 
-	@Test
-	void orderByOnAScanFallbackMethodThrows() {
-		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> createSpec(Entity.class, "findByRoundOrderByRoundAsc", "ACTIVE"));
-		assertTrue(ex.getMessage().contains("Scan"));
-	}
+		@Test
+		@DisplayName("OrderBy on a scan fallback method throws")
+		void orderByOnAScanFallbackMethodThrows() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> createSpec(Entity.class, "findByRoundOrderByRoundAsc", ROUND_ACTIVE));
 
-	@Test
-	void multiPropertyOrderByThrows() {
-		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> createSpec(Entity.class, "findByPkOrderBySkAscRoundDesc", "pk-1"));
-		assertTrue(ex.getMessage().contains("single ScanIndexForward"));
-	}
+			assertTrue(ex.getMessage().contains("Scan"));
+		}
 
-	@Test
-	void orderByAPlaceholderPropertyOfATemplateColumnThrows() {
-		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> createSpec(Match.class, "findByTournamentIdAndYearOrderByRoundAsc", "cust-1", 2024));
-		assertTrue(ex.getMessage().contains("round"));
-		assertTrue(ex.getMessage().contains("@SortKeyTemplate"));
+		@Test
+		@DisplayName("multi-property OrderBy throws")
+		void multiPropertyOrderByThrows() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> createSpec(Entity.class, "findByPkOrderBySkAscRoundDesc", PK_VALUE));
+
+			assertTrue(ex.getMessage().contains("single ScanIndexForward"));
+		}
+
+		@Test
+		@DisplayName("OrderBy a placeholder property of a @SortKeyTemplate throws")
+		void orderByAPlaceholderPropertyOfATemplateColumnThrows() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> createSpec(Match.class, "findByTournamentIdAndYearOrderByRoundAsc", PARTITION_KEY, YEAR));
+
+			assertAll(() -> assertTrue(ex.getMessage().contains("round")),
+					() -> assertTrue(ex.getMessage().contains("@SortKeyTemplate")));
+		}
 	}
 }

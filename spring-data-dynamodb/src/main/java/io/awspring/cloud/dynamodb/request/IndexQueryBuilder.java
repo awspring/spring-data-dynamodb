@@ -30,6 +30,10 @@ import java.util.function.BiFunction;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.mapping.MappingException;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class IndexQueryBuilder<T> {
 
 	@FunctionalInterface

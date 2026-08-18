@@ -19,6 +19,10 @@ import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import org.springframework.data.convert.ValueConversionContext;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbConversionContext implements ValueConversionContext<DynamoDbPersistentProperty> {
 
 	private final DynamoDbPersistentProperty property;

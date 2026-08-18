@@ -16,6 +16,7 @@
 package io.awspring.cloud.dynamodb.core.mapping;
 
 import java.lang.annotation.*;
+import org.springframework.core.annotation.AliasFor;
 import org.springframework.data.annotation.Persistent;
 
 @Documented
@@ -25,6 +26,10 @@ import org.springframework.data.annotation.Persistent;
 @Target({ ElementType.TYPE })
 public @interface Table {
 
+	@AliasFor("tableName")
+	String value() default "";
+
+	@AliasFor("value")
 	String tableName() default "";
 
 	String typeName() default "";

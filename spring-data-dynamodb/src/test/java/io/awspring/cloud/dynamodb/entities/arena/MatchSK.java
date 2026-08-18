@@ -20,6 +20,10 @@ import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class MatchSK extends Match {
 
 	@Column("GLOBAL_SK_1")
@@ -44,10 +48,6 @@ public class MatchSK extends Match {
 
 	@Override
 	public boolean equals(Object o) {
-		if (this == o)
-			return true;
-		if (o == null || getClass() != o.getClass())
-			return false;
 		if (!super.equals(o))
 			return false;
 		MatchSK matchSK = (MatchSK) o;

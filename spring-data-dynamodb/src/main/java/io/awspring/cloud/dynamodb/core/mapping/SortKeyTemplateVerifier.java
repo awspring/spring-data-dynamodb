@@ -22,6 +22,10 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.data.mapping.MappingException;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class SortKeyTemplateVerifier implements DynamoDbPersistentEntityMetadataVerifier {
 
 	@Override

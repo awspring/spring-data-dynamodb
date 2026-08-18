@@ -16,11 +16,11 @@
 package io.awspring.cloud.dynamodb.core;
 
 import io.awspring.cloud.dynamodb.core.converter.DynamoDbConverter;
+import io.awspring.cloud.dynamodb.core.converter.MappingDynamoDbConverter;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.cloud.dynamodb.core.mapping.IndexKeySchema;
 import io.awspring.cloud.dynamodb.core.mapping.TypeDiscriminatorRegistry;
-import io.awspring.cloud.dynamodb.core.mapping.events.*;
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbAfterConvertCallback;
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbAfterConvertEvent;
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbAfterDeleteEvent;
@@ -33,24 +33,23 @@ import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbBeforeSaveCallback
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbBeforeSaveEvent;
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbBeforeUpdateEvent;
 import io.awspring.cloud.dynamodb.core.mapping.events.DynamoDbMappingEvent;
-import io.awspring.cloud.dynamodb.request.*;
 import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbConditionRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbQueryRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbScanRequest;
-import io.awspring.cloud.dynamodb.request.DynamoDbScanRequestInterface;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.cloud.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
 import io.awspring.cloud.dynamodb.request.IndexQueryBuilder;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
@@ -65,9 +64,16 @@ import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.util.Assert;
+import org.springframework.util.backoff.BackOff;
+import org.springframework.util.backoff.BackOffExecution;
+import org.springframework.util.backoff.ExponentialBackOff;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbTemplate extends DynamoDbAccessor
 		implements DynamoDbOperations, ApplicationContextAware, ApplicationEventPublisherAware {
 
@@ -76,7 +82,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	private final StatementFactory statementFactory;
 
 	private @Nullable EntityCallbacks entityCallbacks;
-	private ApplicationEventPublisher eventPublisher;
+	private @Nullable ApplicationEventPublisher eventPublisher;
 
 	public DynamoDbTemplate(DynamoDbClient dynamoDbClient, DynamoDbConverter converter) {
 		setDynamoDbClient(dynamoDbClient);
@@ -107,13 +113,27 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		}
 	}
 
-	private static final int MAX_BATCH_WRITE_RETRIES = 8;
 	private static final int BATCH_WRITE_MAX_ITEMS = 25;
-	private static final long INITIAL_BACKOFF_MILLIS = 50L;
-	private static final long MAX_BACKOFF_MILLIS = 5000L;
+
+	private BackOff batchWriteBackOff = defaultBatchWriteBackOff();
+
+	private static BackOff defaultBatchWriteBackOff() {
+		ExponentialBackOff backOff = new ExponentialBackOff();
+		backOff.setInitialInterval(50L);
+		backOff.setMultiplier(2.0);
+		backOff.setMaxInterval(5000L);
+		backOff.setJitter(25L);
+		backOff.setMaxAttempts(8);
+		return backOff;
+	}
+
+	public void setBatchWriteBackOff(BackOff batchWriteBackOff) {
+		Assert.notNull(batchWriteBackOff, "BackOff must not be null");
+		this.batchWriteBackOff = batchWriteBackOff;
+	}
 
 	@Override
-	public <T> Iterable<T> saveAll(Iterable<T> entities) {
+	public <T> Iterable<T> saveAll(Iterable<? extends T> entities) {
 		Assert.notNull(entities, "Entities must not be null");
 
 		List<T> entityList = new ArrayList<>();
@@ -121,93 +141,84 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		if (entityList.isEmpty()) {
 			return entityList;
 		}
-		Class<?> firstType = entityList.get(0).getClass();
-		for (int i = 1; i < entityList.size(); i++) {
-			if (!entityList.get(i).getClass().equals(firstType)) {
-				throw new InvalidDataAccessApiUsageException(String.format(
-						"saveAll() requires all entities to be of the same type; found %s at index 0 and %s at index %d",
-						firstType.getName(), entityList.get(i).getClass().getName(), i));
-			}
-		}
-		String tableName = getTableName(firstType);
-		rejectIfSecondaryIndexView(getRequiredPersistentEntity(firstType), "saveAll()");
-
-		List<T> preparedEntities = new ArrayList<>();
-		List<WriteRequest> allWriteRequests = new ArrayList<>();
+		Map<Class<?>, DynamoDbPersistentEntity<?>> entitiesByType = new HashMap<>();
+		List<T> preparedEntities = new ArrayList<>(entityList.size());
+		List<String> tableNames = new ArrayList<>(entityList.size());
+		Map<String, List<WriteRequest>> writeRequestsByTable = new LinkedHashMap<>();
 		for (T entity : entityList) {
-			EntityOperations.AdaptibleEntity<T> source = getEntityOperations().forEntity(entity,
-					getConverter().getConversionService());
-			DynamoDbPersistentEntity<?> persistentEntity = source.getPersistentEntity();
-
-			if (persistentEntity.hasVersionProperty()) {
-				boolean wasNew = source.isNew();
-				if (wasNew) {
-					source.initializeVersionProperty();
-				}
-				else {
-					source.incrementVersion();
-				}
-			}
+			DynamoDbPersistentEntity<?> typeEntity = entitiesByType.computeIfAbsent(entity.getClass(),
+					this::resolveBatchWritableEntity);
+			String tableName = typeEntity.getTableName();
 
 			T entityToSave = maybeCallBeforeConvert(entity, tableName);
 			entityToSave = maybeCallBeforeSave(entityToSave, tableName);
 			maybeEmitEvent(new DynamoDbBeforeSaveEvent<>(entityToSave, tableName));
 			preparedEntities.add(entityToSave);
-			allWriteRequests.add(WriteRequest.builder().putRequest(doSaveAll(entityToSave, persistentEntity)).build());
+			tableNames.add(tableName);
+			writeRequestsByTable.computeIfAbsent(tableName, name -> new ArrayList<>())
+					.add(statementFactory.writeRequestForBatchPut(entityToSave, typeEntity));
 		}
 
-		List<List<WriteRequest>> chunks = new ArrayList<>();
-		for (int i = 0; i < allWriteRequests.size(); i += BATCH_WRITE_MAX_ITEMS) {
-			int end = Math.min(i + BATCH_WRITE_MAX_ITEMS, allWriteRequests.size());
-			chunks.add(allWriteRequests.subList(i, end));
-		}
-
-		for (List<WriteRequest> chunk : chunks) {
-			processBatchWithRetry(tableName, chunk);
+		for (Map.Entry<String, List<WriteRequest>> entry : writeRequestsByTable.entrySet()) {
+			List<WriteRequest> writeRequests = entry.getValue();
+			for (int i = 0; i < writeRequests.size(); i += BATCH_WRITE_MAX_ITEMS) {
+				int end = Math.min(i + BATCH_WRITE_MAX_ITEMS, writeRequests.size());
+				processBatchWithRetry(entry.getKey(), writeRequests.subList(i, end));
+			}
 		}
 
 		List<T> savedEntities = new ArrayList<>(preparedEntities.size());
-		for (T entityToSave : preparedEntities) {
-			T saved = maybeCallAfterSave(entityToSave, tableName);
+		for (int i = 0; i < preparedEntities.size(); i++) {
+			String tableName = tableNames.get(i);
+			T saved = maybeCallAfterSave(preparedEntities.get(i), tableName);
 			maybeEmitEvent(new DynamoDbAfterSaveEvent<>(saved, tableName));
 			savedEntities.add(saved);
 		}
 		return savedEntities;
 	}
 
+	private DynamoDbPersistentEntity<?> resolveBatchWritableEntity(Class<?> entityType) {
+
+		DynamoDbPersistentEntity<?> persistentEntity = getRequiredPersistentEntity(entityType);
+		rejectIfSecondaryIndexView(persistentEntity, "saveAll()");
+		if (persistentEntity.hasVersionProperty()) {
+			throw new InvalidDataAccessApiUsageException(String.format(
+					"saveAll() cannot honor @Version optimistic locking because DynamoDB BatchWriteItem does not "
+							+ "support conditional writes; use save() for versioned entities of type %s",
+					entityType.getName()));
+		}
+		return persistentEntity;
+	}
+
 	private void processBatchWithRetry(String tableName, List<WriteRequest> writeRequests) {
 		List<WriteRequest> remainingRequests = new ArrayList<>(writeRequests);
-		long backoffMillis = INITIAL_BACKOFF_MILLIS;
+		BackOffExecution backOffExecution = batchWriteBackOff.start();
+		int attempts = 0;
 
-		for (int attempt = 0; attempt < MAX_BATCH_WRITE_RETRIES; attempt++) {
-			if (remainingRequests.isEmpty()) {
-				return;
-			}
+		while (!remainingRequests.isEmpty()) {
 
 			Map<String, List<WriteRequest>> requestItems = new HashMap<>();
 			requestItems.put(tableName, remainingRequests);
-			BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder().requestItems(requestItems)
-					.build();
+			BatchWriteItemRequest batchWriteItemRequest = statementFactory.batchWrite(requestItems);
 
 			BatchWriteItemResponse response = execute("batchWriteItem", c -> c.batchWriteItem(batchWriteItemRequest));
+			attempts++;
 
-			if (response.hasUnprocessedItems() && response.unprocessedItems().containsKey(tableName)) {
-				remainingRequests = response.unprocessedItems().get(tableName);
-
-				if (attempt < MAX_BATCH_WRITE_RETRIES - 1) {
-					long jitter = java.util.concurrent.ThreadLocalRandom.current().nextLong(backoffMillis / 2 + 1);
-					waitBeforeRetry(backoffMillis + jitter);
-					backoffMillis = Math.min(backoffMillis * 2, MAX_BACKOFF_MILLIS);
-				}
-			}
-			else {
+			List<WriteRequest> unprocessed = response.hasUnprocessedItems() ? response.unprocessedItems().get(tableName)
+					: null;
+			if (unprocessed == null || unprocessed.isEmpty()) {
 				return;
 			}
-		}
+			remainingRequests = unprocessed;
 
-		throw new DataAccessResourceFailureException(
-				String.format("Failed to write %d item(s) to table '%s' after %d attempts due to unprocessed items",
-						remainingRequests.size(), tableName, MAX_BATCH_WRITE_RETRIES));
+			long waitMillis = backOffExecution.nextBackOff();
+			if (waitMillis == BackOffExecution.STOP) {
+				throw new DataAccessResourceFailureException(String.format(
+						"Failed to write %d item(s) to table '%s' after %d attempt(s) due to unprocessed items",
+						remainingRequests.size(), tableName, attempts));
+			}
+			waitBeforeRetry(waitMillis);
+		}
 	}
 
 	protected void waitBeforeRetry(long millis) {
@@ -275,10 +286,6 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		return response.hasItem() && !response.item().isEmpty();
 	}
 
-	private <T> PutRequest doSaveAll(T entityToSave, DynamoDbPersistentEntity<?> persistentEntity) {
-		return statementFactory.insertAll(entityToSave, persistentEntity);
-	}
-
 	@Override
 	public <T> EntityWriteResult<T> save(T entity) {
 		return save(entity, new DynamoDbConditionRequest());
@@ -294,15 +301,17 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		rejectIfSecondaryIndexView(persistentEntity, "save()");
 
 		Number previousVersion = null;
+		Number originalVersion = null;
 		DynamoDbConditionRequest augmentedConditionRequest = dynamoDBConditionRequest;
 		boolean versionConditionApplied = persistentEntity.hasVersionProperty();
 		if (versionConditionApplied) {
+			originalVersion = source.getVersion();
 			boolean wasNew = source.isNew();
 			if (wasNew) {
 				source.initializeVersionProperty();
 			}
 			else {
-				previousVersion = source.getVersion();
+				previousVersion = originalVersion;
 				source.incrementVersion();
 			}
 			augmentedConditionRequest = addVersionCondition(dynamoDBConditionRequest, persistentEntity, previousVersion,
@@ -311,18 +320,19 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 
 		T entityToSave = maybeCallBeforeConvert(entity, tableName);
 		entityToSave = maybeCallBeforeSave(entityToSave, tableName);
+		maybeEmitEvent(new DynamoDbBeforeSaveEvent<T>(entityToSave, tableName));
 		PutItemRequest request = statementFactory.insert(entityToSave, persistentEntity, tableName,
 				augmentedConditionRequest);
-		maybeEmitEvent(new DynamoDbBeforeSaveEvent<T>(entityToSave, tableName));
 
 		try {
-			PutItemResponse putItemResponse = getCurrentDynamoDbClient().putItem(request);
+			executeConditionalWrite("putItem", c -> c.putItem(request));
 			T saved = maybeCallAfterSave(entityToSave, tableName);
 			maybeEmitEvent(new DynamoDbAfterSaveEvent<>(saved, tableName));
 			return EntityWriteResult.of(saved);
 		}
 		catch (ConditionalCheckFailedException e) {
 			if (versionConditionApplied) {
+				source.setVersion(originalVersion);
 				throw new OptimisticLockingFailureException(
 						"Version mismatch during save for entity " + entity.getClass().getName()
 								+ (previousVersion != null ? " (expected version: " + previousVersion + ")" : ""),
@@ -332,13 +342,11 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 					+ entity.getClass().getName() + " -- the supplied condition expression was not satisfied", e);
 		}
 		catch (RuntimeException e) {
+			if (versionConditionApplied) {
+				source.setVersion(originalVersion);
+			}
 			throw translateIfPossible("putItem", e);
 		}
-	}
-
-	@Override
-	public <T> EntityWriteResult<T> save(T entity, DynamoDbConditionRequestInterface builderInterface) {
-		return save(entity, builderInterface.build(DynamoDbConditionRequest.Builder.request()));
 	}
 
 	@Override
@@ -350,27 +358,37 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		DynamoDbPersistentEntity<?> persistentEntity = source.getPersistentEntity();
 		rejectIfSecondaryIndexView(persistentEntity, "insert()");
 
+		Number originalVersion = null;
+		boolean versionInitialized = false;
 		if (persistentEntity.hasVersionProperty() && source.isNew()) {
+			originalVersion = source.getVersion();
 			source.initializeVersionProperty();
+			versionInitialized = true;
 		}
 		DynamoDbConditionRequest insertCondition = buildInsertCondition(persistentEntity);
 
 		T entityToSave = maybeCallBeforeConvert(entity, tableName);
 		entityToSave = maybeCallBeforeSave(entityToSave, tableName);
-		PutItemRequest request = statementFactory.insert(entityToSave, persistentEntity, tableName, insertCondition);
 		maybeEmitEvent(new DynamoDbBeforeSaveEvent<>(entityToSave, tableName));
+		PutItemRequest request = statementFactory.insert(entityToSave, persistentEntity, tableName, insertCondition);
 
 		try {
-			PutItemResponse putItemResponse = getCurrentDynamoDbClient().putItem(request);
+			executeConditionalWrite("putItem", c -> c.putItem(request));
 			T saved = maybeCallAfterSave(entityToSave, tableName);
 			maybeEmitEvent(new DynamoDbAfterSaveEvent<>(saved, tableName));
 			return EntityWriteResult.of(saved);
 		}
 		catch (ConditionalCheckFailedException e) {
+			if (versionInitialized) {
+				source.setVersion(originalVersion);
+			}
 			throw new DuplicateKeyException("Entity of type " + entity.getClass().getName()
 					+ " already exists (insert requires a non-existent partition key)", e);
 		}
 		catch (RuntimeException e) {
+			if (versionInitialized) {
+				source.setVersion(originalVersion);
+			}
 			throw translateIfPossible("putItem", e);
 		}
 	}
@@ -414,12 +432,6 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	}
 
 	@Override
-	public <T> void delete(Class<T> entityClass, Object primaryKey, @Nullable Object sortKey,
-			DynamoDbConditionRequestInterface builderInterface) {
-		delete(entityClass, primaryKey, sortKey, builderInterface.build(DynamoDbConditionRequest.Builder.request()));
-	}
-
-	@Override
 	public DynamoDbConverter getConverter() {
 		return this.converter;
 	}
@@ -428,12 +440,17 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	public <T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequest qr,
 			DynamoDbPageRequest dynamoDBPageRequest) {
 		String tableName = getTableName(entityClass);
-		DynamoDbPersistentEntity basicDynamoDbPersistentEntity = getRequiredPersistentEntity(entityClass);
+		DynamoDbPersistentEntity<?> basicDynamoDbPersistentEntity = getRequiredPersistentEntity(entityClass);
 		QueryRequest queryRequest = statementFactory.query(tableName, basicDynamoDbPersistentEntity, qr,
 				dynamoDBPageRequest);
 		QueryResponse queryResponse = execute("query", c -> c.query(queryRequest));
 		List<T> listToBeReturned = new ArrayList<>(queryResponse.items().size());
-		queryResponse.items().forEach(item -> listToBeReturned.add(readAndConvert(entityClass, item, tableName)));
+		queryResponse.items().forEach(item -> {
+			var converted = readAndConvert(entityClass, item, tableName);
+			if (converted != null) {
+				listToBeReturned.add(converted);
+			}
+		});
 		if (queryResponse.hasLastEvaluatedKey()) {
 			return EntityQueryResult.of(listToBeReturned, queryResponse.count(),
 					toCursor(queryResponse.lastEvaluatedKey()));
@@ -443,30 +460,65 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	}
 
 	@Override
-	public <T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequestInterface builderInterface,
+	public EntityQueryResult<List<Object>> queryPolymorphic(String tableName, DynamoDbQueryRequest queryRequest,
 			DynamoDbPageRequest dynamoDBPageRequest) {
-		return query(entityClass, builderInterface.build(DynamoDbQueryRequest.Builder.request()), dynamoDBPageRequest);
+		Collection<DynamoDbPersistentEntity<?>> entities = entitiesForTable(tableName);
+		DynamoDbPageRequest pageRequest = dynamoDBPageRequest != null ? dynamoDBPageRequest
+				: DynamoDbPageRequest.of(null);
+		QueryRequest request = statementFactory.query(tableName, entities.iterator().next(), queryRequest, pageRequest);
+		QueryResponse response = execute("query", c -> c.query(request));
+		return toPolymorphicResult(response.items(), response.count(),
+				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities, tableName);
+	}
+
+	@Override
+	@Nullable
+	public <A> EntityQueryResult<A> queryAggregate(Class<A> aggregateClass, DynamoDbQueryRequest dynamoDbRequest,
+			DynamoDbPageRequest dynamoDBPageRequest) {
+		Assert.notNull(aggregateClass, "aggregateClass must not be null");
+
+		@SuppressWarnings("unchecked")
+		DynamoDbPersistentEntity<A> entity = (DynamoDbPersistentEntity<A>) getRequiredPersistentEntity(aggregateClass);
+		DynamoDbPageRequest pageRequest = dynamoDBPageRequest != null ? dynamoDBPageRequest
+				: DynamoDbPageRequest.of(null);
+		var indexName = entity.getAggregateIndexName();
+
+		List<Map<String, AttributeValue>> items = new ArrayList<>();
+		long total = 0L;
+		Map<String, Object> exclusiveStartKey = pageRequest.getLastEvaluatedKey();
+		do {
+			final QueryRequest request = statementFactory.query(entity.getTableName(), entity, dynamoDbRequest,
+					DynamoDbPageRequest.of(null, exclusiveStartKey), indexName);
+			QueryResponse response = execute("query", c -> c.query(request));
+			items.addAll(response.items());
+			total += response.count() != null ? response.count() : 0L;
+			exclusiveStartKey = response.hasLastEvaluatedKey() ? toCursor(response.lastEvaluatedKey()) : null;
+		}
+		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
+
+		var results = ((MappingDynamoDbConverter) this.converter).readAggregate(items, entity);
+		return EntityQueryResult.of(results, (int) total);
 	}
 
 	@Override
 	public <T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
 		String tableName = getTableName(entityClass);
-		DynamoDbPersistentEntity basicDynamoDbPersistentEntity = getRequiredPersistentEntity(entityClass);
+		DynamoDbPersistentEntity<?> basicDynamoDbPersistentEntity = getRequiredPersistentEntity(entityClass);
 		var scan = statementFactory.scan(tableName, scanRequest, basicDynamoDbPersistentEntity);
 		ScanResponse scanResponse = execute("scan", c -> c.scan(scan));
 		List<T> listToBeReturned = new ArrayList<>(scanResponse.items().size());
-		scanResponse.items().forEach(item -> listToBeReturned.add(readAndConvert(entityClass, item, tableName)));
+		scanResponse.items().forEach(item -> {
+			var converted = readAndConvert(entityClass, item, tableName);
+			if (converted != null) {
+				listToBeReturned.add(converted);
+			}
+		});
 		if (scanResponse.hasLastEvaluatedKey()) {
 			return EntityQueryResult.of(listToBeReturned, scanResponse.count(),
 					toCursor(scanResponse.lastEvaluatedKey()));
 		}
 		return EntityQueryResult.of(listToBeReturned, scanResponse.count());
 
-	}
-
-	@Override
-	public <T> EntityQueryResult<List<T>> scan(Class<T> entityClass, DynamoDbScanRequestInterface builderInterface) {
-		return scan(entityClass, builderInterface.build(DynamoDbScanRequest.Builder.builder()));
 	}
 
 	@Override
@@ -493,8 +545,12 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 				c -> c.executeStatement(executeStatementRequest));
 		String tableName = getTableName(entityClass);
 		List<T> listToBeReturned = new ArrayList<>(executeStatementResponse.items().size());
-		executeStatementResponse.items()
-				.forEach(item -> listToBeReturned.add(readAndConvert(entityClass, item, tableName)));
+		executeStatementResponse.items().forEach(item -> {
+			var converted = readAndConvert(entityClass, item, tableName);
+			if (converted != null) {
+				listToBeReturned.add(converted);
+			}
+		});
 		return EntityReadResult.of(listToBeReturned, executeStatementResponse.nextToken());
 	}
 
@@ -502,13 +558,19 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	public <T> EntityWriteResult<T> update(T entity) {
 		Assert.notNull(entity, "Entity must not be null");
 		String tableName = getTableName(entity.getClass());
-		DynamoDbPersistentEntity dynamoDbPersistenceEntity = getRequiredPersistentEntity(entity.getClass());
+		DynamoDbPersistentEntity<?> dynamoDbPersistenceEntity = getRequiredPersistentEntity(entity.getClass());
 		rejectIfSecondaryIndexView(dynamoDbPersistenceEntity, "update()");
 
 		Number previousVersion = null;
-		if (dynamoDbPersistenceEntity.hasVersionProperty()) {
-			EntityOperations.AdaptibleEntity<T> source = getEntityOperations().forEntity(entity,
-					getConverter().getConversionService());
+		EntityOperations.AdaptibleEntity<T> source = null;
+		boolean versioned = dynamoDbPersistenceEntity.hasVersionProperty();
+		if (versioned) {
+			source = getEntityOperations().forEntity(entity, getConverter().getConversionService());
+			if (source.isNew()) {
+				throw new InvalidDataAccessApiUsageException(
+						"update() requires an existing entity with a non-null @Version; " + entity.getClass().getName()
+								+ " has no version value -- use save() or insert() for new entities");
+			}
 			previousVersion = source.getVersion();
 			source.incrementVersion();
 		}
@@ -518,17 +580,23 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		maybeEmitEvent(new DynamoDbBeforeUpdateEvent<>(entity, tableName));
 
 		try {
-			UpdateItemResponse updateItemResponse = getCurrentDynamoDbClient().updateItem(updateItemRequest);
+			executeConditionalWrite("updateItem", c -> c.updateItem(updateItemRequest));
 			maybeEmitEvent(new DynamoDbAfterUpdateEvent<>(entity, tableName));
 			return EntityWriteResult.of(entity);
 		}
 		catch (ConditionalCheckFailedException e) {
+			if (versioned) {
+				source.setVersion(previousVersion);
+			}
 			throw new OptimisticLockingFailureException(
 					"Version mismatch during update for entity " + entity.getClass().getName()
 							+ (previousVersion != null ? " (expected version: " + previousVersion + ")" : ""),
 					e);
 		}
 		catch (RuntimeException e) {
+			if (versioned) {
+				source.setVersion(previousVersion);
+			}
 			throw translateIfPossible("updateItem", e);
 		}
 	}
@@ -536,7 +604,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	@Override
 	public <T> EntityWriteResult<T> update(Object partitionKey, @Nullable Object sortKey,
 			DynamoDbUpdateExpressionRequest dynamoDBUpdateExpressionRequest, Class<T> entityClass) {
-		DynamoDbPersistentEntity dynamoDbPersistenceEntity = getRequiredPersistentEntity(entityClass);
+		DynamoDbPersistentEntity<?> dynamoDbPersistenceEntity = getRequiredPersistentEntity(entityClass);
 		rejectIfSecondaryIndexView(dynamoDbPersistenceEntity, "update()");
 		String tableName = getTableName(entityClass);
 		UpdateItemRequest updateItemRequest = statementFactory.update(partitionKey, sortKey,
@@ -544,7 +612,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		maybeEmitEvent(new DynamoDbBeforeUpdateEvent<>(entityClass, tableName));
 		UpdateItemResponse updateItemResponse = execute("updateItem", c -> c.updateItem(updateItemRequest));
 		maybeEmitEvent(new DynamoDbAfterUpdateEvent<>(entityClass, tableName));
-		return EntityWriteResult.of(converter.read(entityClass, updateItemResponse.attributes()));
+		return EntityWriteResult.of(readAndConvert(entityClass, updateItemResponse.attributes(), tableName));
 	}
 
 	@Override
@@ -570,12 +638,74 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 
 	@Override
 	public <T> long count(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
-		return new ScanPager<>(entityClass, this::scan).countAll(scanRequest);
+		return scanCountPages(entityClass, scanRequest, false);
 	}
 
 	@Override
 	public <T> boolean exists(Class<T> entityClass, DynamoDbScanRequest scanRequest) {
-		return new ScanPager<>(entityClass, this::scan).exists(scanRequest, results -> !results.isEmpty());
+		return scanCountPages(entityClass, scanRequest, true) > 0L;
+	}
+
+	@Override
+	public <T> long count(Class<T> entityClass, DynamoDbQueryRequest queryRequest) {
+		return queryCountPages(entityClass, queryRequest, false);
+	}
+
+	@Override
+	public <T> boolean exists(Class<T> entityClass, DynamoDbQueryRequest queryRequest) {
+		return queryCountPages(entityClass, queryRequest, true) > 0L;
+	}
+
+	private long queryCountPages(Class<?> entityClass, DynamoDbQueryRequest baseRequest, boolean stopAtFirstMatch) {
+		String tableName = getTableName(entityClass);
+		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
+
+		long total = 0L;
+		Map<String, Object> exclusiveStartKey = null;
+		do {
+			QueryRequest countRequest = statementFactory
+					.query(tableName, entity, baseRequest, DynamoDbPageRequest.of(null, exclusiveStartKey)).toBuilder()
+					.select(Select.COUNT).projectionExpression(null).build();
+			QueryResponse response = execute("query", c -> c.query(countRequest));
+
+			total += response.count() != null ? response.count() : 0L;
+			if (stopAtFirstMatch && total > 0L) {
+				return total;
+			}
+			exclusiveStartKey = response.hasLastEvaluatedKey() ? toCursor(response.lastEvaluatedKey()) : null;
+		}
+		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
+
+		return total;
+	}
+
+	private long scanCountPages(Class<?> entityClass, DynamoDbScanRequest baseRequest, boolean stopAtFirstMatch) {
+		String tableName = getTableName(entityClass);
+		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
+
+		long total = 0L;
+		Map<String, Object> exclusiveStartKey = baseRequest.getExclusiveStartKey();
+		do {
+			DynamoDbScanRequest pageRequest = DynamoDbScanRequest.Builder.builder()
+					.withConsistentRead(baseRequest.isConsistentRead()).withExclusiveStartKey(exclusiveStartKey)
+					.withExpressionAttributeNames(baseRequest.getExpressionAttributeNames())
+					.withExpressionAttributeValues(baseRequest.getExpressionAttributeValues())
+					.withFilterExpression(baseRequest.getFilterExpression()).withIndexName(baseRequest.getIndexName())
+					.withLimit(baseRequest.getLimit()).build();
+
+			ScanRequest countRequest = statementFactory.scan(tableName, pageRequest, entity).toBuilder()
+					.select(Select.COUNT).projectionExpression(null).build();
+			ScanResponse response = execute("scan", c -> c.scan(countRequest));
+
+			total += response.count() != null ? response.count() : 0L;
+			if (stopAtFirstMatch && total > 0L) {
+				return total;
+			}
+			exclusiveStartKey = response.hasLastEvaluatedKey() ? toCursor(response.lastEvaluatedKey()) : null;
+		}
+		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
+
+		return total;
 	}
 
 	@Override
@@ -589,33 +719,12 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	}
 
 	@Override
-	public <T> IndexQueryBuilder<T> query(Class<T> entityClass, String indexName) {
-		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
-		IndexKeySchema keySchema = entity.getKeySchema();
-		IndexQueryBuilder.QueryExecutor<T> executor = (clazz, request, pageRequest) -> query(clazz, request,
-				pageRequest != null ? pageRequest : DynamoDbPageRequest.of(null));
-		return new IndexQueryBuilder<>(entityClass, indexName, keySchema, executor);
-	}
-
-	@Override
-	public EntityQueryResult<List<Object>> queryPolymorphic(String tableName, DynamoDbQueryRequest queryRequest,
-			DynamoDbPageRequest dynamoDBPageRequest) {
-		Collection<DynamoDbPersistentEntity<?>> entities = entitiesForTable(tableName);
-		DynamoDbPageRequest pageRequest = dynamoDBPageRequest != null ? dynamoDBPageRequest
-				: DynamoDbPageRequest.of(null);
-		QueryRequest request = statementFactory.query(tableName, entities.iterator().next(), queryRequest, pageRequest);
-		QueryResponse response = execute("query", c -> c.query(request));
-		return toPolymorphicResult(response.items(), response.count(),
-				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities);
-	}
-
-	@Override
 	public EntityQueryResult<List<Object>> scanPolymorphic(String tableName, DynamoDbScanRequest scanRequest) {
 		Collection<DynamoDbPersistentEntity<?>> entities = entitiesForTable(tableName);
 		var scan = statementFactory.scan(tableName, scanRequest, entities.iterator().next());
 		ScanResponse response = execute("scan", c -> c.scan(scan));
 		return toPolymorphicResult(response.items(), response.count(),
-				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities);
+				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities, tableName);
 	}
 
 	private Collection<DynamoDbPersistentEntity<?>> entitiesForTable(String tableName) {
@@ -623,16 +732,20 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 				.getEntitiesForTable(tableName);
 		Assert.state(!entities.isEmpty(), () -> "No @Table entity registered for table '" + tableName
 				+ "' -- cannot resolve polymorphic result types.");
-		return entities;
+		return entities.stream().sorted(Comparator.comparing(e -> e.getType().getName())).collect(Collectors.toList());
 	}
 
 	private EntityQueryResult<List<Object>> toPolymorphicResult(List<Map<String, AttributeValue>> items, Integer count,
-			@Nullable Map<String, AttributeValue> lastEvaluatedKey, Collection<DynamoDbPersistentEntity<?>> entities) {
+			@Nullable Map<String, AttributeValue> lastEvaluatedKey, Collection<DynamoDbPersistentEntity<?>> entities,
+			String tableName) {
 		TypeDiscriminatorRegistry registry = TypeDiscriminatorRegistry.fromEntities(entities);
 		List<Object> results = new ArrayList<>(items.size());
 		for (Map<String, AttributeValue> item : items) {
 			if (item != null && !item.isEmpty()) {
-				results.add(converter.read(registry.resolve(item), item));
+				Object converted = readAndConvert(registry.resolve(item), item, tableName);
+				if (converted != null) {
+					results.add(converted);
+				}
 			}
 		}
 		if (lastEvaluatedKey != null) {
@@ -654,6 +767,18 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		}
 	}
 
+	private <R> R executeConditionalWrite(String task, Function<DynamoDbClient, R> action) {
+		try {
+			return action.apply(getCurrentDynamoDbClient());
+		}
+		catch (ConditionalCheckFailedException ex) {
+			throw ex;
+		}
+		catch (RuntimeException ex) {
+			throw translateIfPossible(task, ex);
+		}
+	}
+
 	private RuntimeException translateIfPossible(String task, RuntimeException ex) {
 		if (ex instanceof DataAccessException) {
 			return ex;
@@ -662,6 +787,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		return translated != null ? translated : ex;
 	}
 
+	@SuppressWarnings("unchecked")
 	protected <T> T maybeCallBeforeConvert(T object, String tableName) {
 
 		if (null != entityCallbacks) {
@@ -671,6 +797,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		return object;
 	}
 
+	@SuppressWarnings("unchecked")
 	protected <T> T maybeCallBeforeSave(T object, String tableName) {
 
 		if (null != entityCallbacks) {
@@ -680,6 +807,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		return object;
 	}
 
+	@SuppressWarnings("unchecked")
 	protected <T> T maybeCallAfterSave(T object, String tableName) {
 
 		if (null != entityCallbacks) {
@@ -689,6 +817,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		return object;
 	}
 
+	@SuppressWarnings("unchecked")
 	protected <T> T maybeCallAfterConvert(T object, String tableName) {
 
 		if (null != entityCallbacks) {
@@ -745,6 +874,22 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 							+ "(use a query() instead).",
 					entity.getType().getName(), entity.getIndexName(), operation));
 		}
+		if (entity.isAggregateView()) {
+			throw new InvalidDataAccessApiUsageException(String.format(
+					"%s is an @AggregateTable fold and does not support %s -- it is read-only. Writes go through "
+							+ "the @Table entities referenced by its @AggregateItem members "
+							+ "(use findAggregate() to read it).",
+					entity.getType().getName(), operation));
+		}
+	}
+
+	@Override
+	public <T> IndexQueryBuilder<T> query(Class<T> entityClass, String indexName) {
+		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
+		IndexKeySchema keySchema = entity.getKeySchema();
+		IndexQueryBuilder.QueryExecutor<T> executor = (clazz, request, pageRequest) -> query(clazz, request,
+				pageRequest != null ? pageRequest : DynamoDbPageRequest.of(null));
+		return new IndexQueryBuilder<>(entityClass, indexName, keySchema, executor);
 	}
 
 	private DynamoDbConditionRequest addVersionCondition(DynamoDbConditionRequest originalRequest,
@@ -765,7 +910,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		String namePlaceholder = uniquePlaceholder(names.keySet(), "#__version");
 		names.put(namePlaceholder, versionColumnName);
 
-		if (isNew) {
+		if (isNew || previousVersion == null) {
 			versionCondition = "attribute_not_exists(" + namePlaceholder + ")";
 		}
 		else {

@@ -15,8 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.mapping;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,14 +30,28 @@ import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.core.mapping.TypeDiscriminatorRegistry;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-public class DiscriminatorOptInTest {
+class DiscriminatorOptInTest {
 
-	@Table(tableName = "orders")
+	private static final String DISCRIMINATOR_COLUMN = "_type";
+	private static final String TABLE_ORDERS = "orders";
+	private static final String TABLE_ARENA = "arena";
+	private static final String TYPE_MATCH = "MATCH";
+	private static final String TYPE_PLAYER = "PLAYER";
+	private static final String PK_CUSTOMER = "cust-1";
+	private static final String SK_MATCH_1 = "MATCH#1";
+	private static final String PK_TOURNAMENT = "TOURNAMENT#1";
+	private static final String SK_MATCH_M1 = "MATCH#m1";
+	private static final String ROUND_QUARTERFINAL = "QUARTERFINAL";
+
+	@Table(tableName = TABLE_ORDERS)
 	static class PlainOrder {
 		@PartitionKey
 		String pk;
@@ -44,7 +60,7 @@ public class DiscriminatorOptInTest {
 		String round;
 	}
 
-	@Table(tableName = "arena", discriminator = "_type", typeName = "MATCH")
+	@Table(tableName = TABLE_ARENA, discriminator = DISCRIMINATOR_COLUMN, typeName = TYPE_MATCH)
 	static class MatchRow {
 		@PartitionKey
 		String pk;
@@ -52,7 +68,7 @@ public class DiscriminatorOptInTest {
 		String sk;
 	}
 
-	@Table(tableName = "arena", discriminator = "_type", typeName = "PLAYER")
+	@Table(tableName = TABLE_ARENA, discriminator = DISCRIMINATOR_COLUMN, typeName = TYPE_PLAYER)
 	static class PlayerRow {
 		@PartitionKey
 		String pk;
@@ -70,103 +86,127 @@ public class DiscriminatorOptInTest {
 		return converter;
 	}
 
-	@Test
-	void anEntityWithNoDiscriminatorHasAnEmptyColumnName() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(PlainOrder.class);
+	@Nested
+	@DisplayName("Write without discriminator")
+	class WriteNoDiscriminator {
 
-		assertEquals("", entity.getDiscriminatorColumn());
+		@Test
+		@DisplayName("Entity with no discriminator has an empty column name")
+		void getDiscriminatorColumn_noDiscriminatorConfigured_returnsEmpty() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+
+			DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(PlainOrder.class);
+
+			assertEquals("", entity.getDiscriminatorColumn());
+		}
+
+		@Test
+		@DisplayName("Writing an entity with no discriminator stamps no extra column")
+		void write_noDiscriminator_doesNotStampTypeColumn() {
+			MappingDynamoDbConverter converter = converterFor(PlainOrder.class);
+			DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
+					.getRequiredPersistentEntity(PlainOrder.class);
+			PlainOrder order = new PlainOrder();
+			order.pk = PK_CUSTOMER;
+			order.sk = SK_MATCH_1;
+			order.round = ROUND_QUARTERFINAL;
+
+			Map<String, AttributeValue> item = new LinkedHashMap<>();
+			converter.write(order, item, entity);
+			converter.stampDiscriminator(item, entity);
+
+			assertAll(() -> assertEquals(3, item.size()), () -> assertFalse(item.containsKey(DISCRIMINATOR_COLUMN)));
+		}
 	}
 
-	@Test
-	void writingAnEntityWithNoDiscriminatorStampsNoExtraColumn() {
-		MappingDynamoDbConverter converter = converterFor(PlainOrder.class);
-		DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
-				.getRequiredPersistentEntity(PlainOrder.class);
+	@Nested
+	@DisplayName("Write with discriminator")
+	class WriteWithDiscriminator {
 
-		PlainOrder match = new PlainOrder();
-		match.pk = "cust-1";
-		match.sk = "MATCH#1";
-		match.round = "QUARTERFINAL";
+		@Test
+		@DisplayName("Writing an entity with a discriminator stamps its type name")
+		void write_withDiscriminator_stampsTypeName() {
+			MappingDynamoDbConverter converter = converterFor(MatchRow.class, PlayerRow.class);
+			DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
+					.getRequiredPersistentEntity(MatchRow.class);
+			MatchRow row = new MatchRow();
+			row.pk = PK_TOURNAMENT;
+			row.sk = SK_MATCH_M1;
 
-		Map<String, AttributeValue> item = new LinkedHashMap<>();
-		converter.write(match, item, entity);
-		converter.stampDiscriminator(item, entity);
+			Map<String, AttributeValue> item = new LinkedHashMap<>();
+			converter.write(row, item, entity);
+			converter.stampDiscriminator(item, entity);
 
-		assertEquals(3, item.size());
-		assertFalse(item.containsKey("_type"));
+			assertAll(() -> assertTrue(item.containsKey(DISCRIMINATOR_COLUMN)),
+					() -> assertEquals(TYPE_MATCH, item.get(DISCRIMINATOR_COLUMN).s()));
+		}
 	}
 
-	@Test
-	void writingAnEntityWithADiscriminatorStampsItsTypeName() {
-		MappingDynamoDbConverter converter = converterFor(MatchRow.class, PlayerRow.class);
-		DynamoDbPersistentEntity<?> entity = converter.getMappingContext().getRequiredPersistentEntity(MatchRow.class);
+	@Nested
+	@DisplayName("Class-less read")
+	class ClasslessRead {
 
-		MatchRow row = new MatchRow();
-		row.pk = "TOURNAMENT#1";
-		row.sk = "MATCH#m1";
+		@Test
+		@DisplayName("Resolves the opted-in type from the discriminator column")
+		void read_withDiscriminatorColumn_resolvesCorrectType() {
+			MappingDynamoDbConverter converter = converterFor(MatchRow.class, PlayerRow.class);
+			DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
+					.getRequiredPersistentEntity(MatchRow.class);
+			MatchRow row = new MatchRow();
+			row.pk = PK_TOURNAMENT;
+			row.sk = SK_MATCH_M1;
+			Map<String, AttributeValue> item = new LinkedHashMap<>();
+			converter.write(row, item, entity);
+			converter.stampDiscriminator(item, entity);
 
-		Map<String, AttributeValue> item = new LinkedHashMap<>();
-		converter.write(row, item, entity);
-		converter.stampDiscriminator(item, entity);
+			Object resolved = converter.read(item);
 
-		assertTrue(item.containsKey("_type"));
-		assertEquals("MATCH", item.get("_type").s());
+			assertInstanceOf(MatchRow.class, resolved);
+		}
+
+		@Test
+		@DisplayName("Fails fast when no entity on the table opted in")
+		void read_noEntityOptedIn_throwsMappingException() {
+			MappingDynamoDbConverter converter = converterFor(PlainOrder.class);
+			DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
+					.getRequiredPersistentEntity(PlainOrder.class);
+			PlainOrder order = new PlainOrder();
+			order.pk = PK_CUSTOMER;
+			order.sk = SK_MATCH_1;
+			order.round = ROUND_QUARTERFINAL;
+			Map<String, AttributeValue> item = new LinkedHashMap<>();
+			converter.write(order, item, entity);
+			converter.stampDiscriminator(item, entity);
+
+			assertThrows(MappingException.class, () -> converter.read(item));
+		}
 	}
 
-	@Test
-	void classLessReadResolvesTheOptedInTypeFromTheDiscriminatorColumn() {
-		MappingDynamoDbConverter converter = converterFor(MatchRow.class, PlayerRow.class);
-		DynamoDbPersistentEntity<?> entity = converter.getMappingContext().getRequiredPersistentEntity(MatchRow.class);
+	@Nested
+	@DisplayName("TypeDiscriminatorRegistry")
+	class Registry {
 
-		MatchRow row = new MatchRow();
-		row.pk = "TOURNAMENT#1";
-		row.sk = "MATCH#m1";
+		@Test
+		@DisplayName("Requires at least one opted-in entity")
+		void fromEntities_noOptedInEntity_throwsMappingException() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+			DynamoDbPersistentEntity<?> plain = mappingContext.getRequiredPersistentEntity(PlainOrder.class);
 
-		Map<String, AttributeValue> item = new LinkedHashMap<>();
-		converter.write(row, item, entity);
-		converter.stampDiscriminator(item, entity);
+			assertThrows(MappingException.class, () -> TypeDiscriminatorRegistry.fromEntities(List.of(plain)));
+		}
 
-		Object resolved = converter.read(item);
-		assertTrue(resolved instanceof MatchRow);
-	}
+		@Test
+		@DisplayName("Resolves types from the opted-in discriminator column")
+		void fromEntities_multipleOptedIn_resolvesCorrectly() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+			DynamoDbPersistentEntity<?> match = mappingContext.getRequiredPersistentEntity(MatchRow.class);
+			DynamoDbPersistentEntity<?> player = mappingContext.getRequiredPersistentEntity(PlayerRow.class);
 
-	@Test
-	void classLessReadFailsFastWhenNoEntityOnTheTableOptedIn() {
-		MappingDynamoDbConverter converter = converterFor(PlainOrder.class);
-		DynamoDbPersistentEntity<?> entity = converter.getMappingContext()
-				.getRequiredPersistentEntity(PlainOrder.class);
+			TypeDiscriminatorRegistry registry = TypeDiscriminatorRegistry.fromEntities(List.of(match, player));
 
-		PlainOrder match = new PlainOrder();
-		match.pk = "cust-1";
-		match.sk = "MATCH#1";
-		match.round = "QUARTERFINAL";
-
-		Map<String, AttributeValue> item = new LinkedHashMap<>();
-		converter.write(match, item, entity);
-		converter.stampDiscriminator(item, entity);
-
-		assertThrows(MappingException.class, () -> converter.read(item));
-	}
-
-	@Test
-	void typeDiscriminatorRegistryRequiresAtLeastOneOptedInEntity() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		DynamoDbPersistentEntity<?> plain = mappingContext.getRequiredPersistentEntity(PlainOrder.class);
-
-		assertThrows(MappingException.class, () -> TypeDiscriminatorRegistry.fromEntities(java.util.List.of(plain)));
-	}
-
-	@Test
-	void typeDiscriminatorRegistryResolvesFromTheOptedInColumn() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		DynamoDbPersistentEntity<?> match = mappingContext.getRequiredPersistentEntity(MatchRow.class);
-		DynamoDbPersistentEntity<?> player = mappingContext.getRequiredPersistentEntity(PlayerRow.class);
-
-		TypeDiscriminatorRegistry registry = TypeDiscriminatorRegistry.fromEntities(java.util.List.of(match, player));
-
-		assertEquals("_type", registry.discriminatorColumn());
-		assertEquals(MatchRow.class, registry.resolve("MATCH"));
-		assertEquals(PlayerRow.class, registry.resolve("PLAYER"));
+			assertAll(() -> assertEquals(DISCRIMINATOR_COLUMN, registry.discriminatorColumn()),
+					() -> assertEquals(MatchRow.class, registry.resolve(TYPE_MATCH)),
+					() -> assertEquals(PlayerRow.class, registry.resolve(TYPE_PLAYER)));
+		}
 	}
 }

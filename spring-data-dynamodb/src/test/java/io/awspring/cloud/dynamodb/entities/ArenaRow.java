@@ -20,6 +20,10 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "arena_table")
 public class ArenaRow {
 	@PartitionKey

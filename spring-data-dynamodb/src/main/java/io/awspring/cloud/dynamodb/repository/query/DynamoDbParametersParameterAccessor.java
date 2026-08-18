@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.repository.query;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.repository.query.ParametersParameterAccessor;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbParametersParameterAccessor extends ParametersParameterAccessor {
 
 	public DynamoDbParametersParameterAccessor(DynamoDbQueryMethod method, @Nullable Object... values) {

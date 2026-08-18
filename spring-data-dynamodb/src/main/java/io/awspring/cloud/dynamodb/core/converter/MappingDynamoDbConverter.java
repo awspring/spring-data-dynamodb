@@ -15,18 +15,20 @@
  */
 package io.awspring.cloud.dynamodb.core.converter;
 
-import io.awspring.cloud.dynamodb.core.mapping.*;
+import io.awspring.cloud.dynamodb.core.mapping.AggregateItem;
 import io.awspring.cloud.dynamodb.core.mapping.BasicDynamoDbPersistentEntity;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.cloud.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.cloud.dynamodb.core.mapping.KeyRole;
+import io.awspring.cloud.dynamodb.core.mapping.KeyTemplate;
 import io.awspring.cloud.dynamodb.core.mapping.KeyTemplateResolver;
 import io.awspring.cloud.dynamodb.core.mapping.TypeDiscriminatorRegistry;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.BeansException;
@@ -47,9 +49,14 @@ import org.springframework.data.mapping.model.PersistentEntityParameterValueProv
 import org.springframework.data.mapping.model.PropertyValueProvider;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		implements ApplicationContextAware, BeanClassLoaderAware, InitializingBean {
 
@@ -99,11 +106,14 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 
 		ConvertingPropertyAccessor convertingPropertyAccessor = newConvertingPropertyAccessor(obj, persistentEntity);
 		for (DynamoDbPersistentProperty property : persistentEntity) {
+			if (property.isDerived()) {
+				continue;
+			}
 			if (propertyValueConversions.hasValueConverter(property)) {
 				items.put(property.getColumnName(),
 						writeWithConverter(property, convertingPropertyAccessor.getProperty(property)));
 			}
-			else if (property.isSpecialType() && !property.serializeAsJson()) {
+			else if (property.isSpecialType() && !property.serializeAsNestedMap()) {
 				Object nested = convertingPropertyAccessor.getProperty(property);
 				if (nested != null) {
 					Class<?> innerType = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
@@ -139,7 +149,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 	private void writeInternal(ConvertingPropertyAccessor<?> convertingPropertyAccessor,
 			DynamoDbPersistentProperty property, Map<String, AttributeValue> attributeValueMap) {
 		attributeValueMap.put(property.getColumnName(),
-				toAttributeValue(convertingPropertyAccessor.getProperty(property), property.serializeAsJson()));
+				toAttributeValue(convertingPropertyAccessor.getProperty(property), property.serializeAsNestedMap()));
 	}
 
 	@SuppressWarnings("unchecked")
@@ -165,26 +175,26 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 
 	private void writeInternalUpdate(ConvertingPropertyAccessor<?> convertingPropertyAccessor,
 			DynamoDbPersistentProperty property, Map<String, AttributeValueUpdate> attributeValueMap) {
-		attributeValueMap.put(property.getColumnName(),
-				AttributeValueUpdate.builder().value(
-						toAttributeValue(convertingPropertyAccessor.getProperty(property), property.serializeAsJson()))
-						.build());
+		attributeValueMap.put(property.getColumnName(), AttributeValueUpdate.builder().value(
+				toAttributeValue(convertingPropertyAccessor.getProperty(property), property.serializeAsNestedMap()))
+				.build());
 	}
 
 	@Override
-	public void delete(Object objectToDelete, Map<String, AttributeValue> keys,
+	public void writeKeyFromEntity(Object entity, Map<String, AttributeValue> keys,
+			DynamoDbPersistentEntity<?> persistentEntity) {
+		fetchKeysAndPopulate(entity, keys, persistentEntity);
+	}
+
+	@Override
+	public void writeKey(Object partitionKey, Map<String, AttributeValue> keys,
 			DynamoDbPersistentEntity<?> persistenceEntity) {
-		fetchKeysAndPopulate(objectToDelete, keys, persistenceEntity);
-	}
-
-	@Override
-	public void findByKey(Object key, Map<String, AttributeValue> keys, DynamoDbPersistentEntity<?> persistenceEntity) {
 		DynamoDbPersistentProperty persistentProperty = persistenceEntity.getIdProperty();
-		keys.put(persistentProperty.getColumnName(), toAttributeValue(key, false));
+		keys.put(persistentProperty.getColumnName(), toAttributeValue(partitionKey, false));
 	}
 
 	@Override
-	public void findByKeys(Object partitionKey, @Nullable Object sortKey, Map<String, AttributeValue> keys,
+	public void writeKey(Object partitionKey, @Nullable Object sortKey, Map<String, AttributeValue> keys,
 			DynamoDbPersistentEntity<?> persistenceEntity) {
 		DynamoDbPersistentProperty persistentProperty = persistenceEntity.getIdProperty();
 		keys.put(persistentProperty.getColumnName(), toAttributeValue(partitionKey, false));
@@ -211,14 +221,14 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			DynamoDbPersistentEntity<?> entity) {
 		ConvertingPropertyAccessor<?> accessor = newConvertingPropertyAccessor(objectToUpdate, entity);
 		for (DynamoDbPersistentProperty property : entity) {
-			if (property.isIdProperty() || isBaseTableSortKey(property)) {
+			if (property.isIdProperty() || isBaseTableSortKey(property) || property.isDerived()) {
 				continue;
 			}
 			if (propertyValueConversions.hasValueConverter(property)) {
 				values.put(property.getColumnName(), AttributeValueUpdate.builder()
 						.value(writeWithConverter(property, accessor.getProperty(property))).build());
 			}
-			else if (property.isSpecialType() && !property.serializeAsJson()) {
+			else if (property.isSpecialType() && !property.serializeAsNestedMap()) {
 				Object nested = accessor.getProperty(property);
 				if (nested != null) {
 					Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
@@ -260,11 +270,16 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 
 		String startsWith = property.startsWith();
 		String endsWith = property.endsWith();
-		boolean routed = (startsWith != null && !startsWith.isEmpty()) || (endsWith != null && !endsWith.isEmpty());
+		Pattern regex = property.regexPattern();
+		boolean routed = regex != null || (startsWith != null && !startsWith.isEmpty())
+				|| (endsWith != null && !endsWith.isEmpty());
 
 		if (routed) {
 			String sortKeyValue = baseTableSortKeyValue(source, owner);
 			if (sortKeyValue == null) {
+				return null;
+			}
+			if (regex != null && !regex.matcher(sortKeyValue).matches()) {
 				return null;
 			}
 			if (startsWith != null && !startsWith.isEmpty() && !sortKeyValue.startsWith(startsWith)) {
@@ -372,7 +387,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 				propertyAccessor.setProperty(property,
 						readWithConverter(property, source.get(property.getColumnName())));
 			}
-			else if (property.isSpecialType() && !property.serializeAsJson()) {
+			else if (property.isSpecialType() && !property.serializeAsNestedMap()) {
 				propertyAccessor.setProperty(property, readInnerClass(property, source, entity));
 			}
 			else {
@@ -381,11 +396,127 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 					elementType = property.getTypeInformation().getComponentType().getType();
 				}
 				propertyAccessor.setProperty(property, fromAttributeValue(source.get(property.getColumnName()),
-						property.getType(), elementType, property.serializeAsJson()));
+						property.getType(), elementType, property.serializeAsNestedMap()));
 			}
 		}
 		readSortKeyTemplates(source, instance, entity);
 		return instance;
+	}
+
+	@SuppressWarnings("unchecked")
+	public <A> A readAggregate(List<Map<String, AttributeValue>> items, DynamoDbPersistentEntity<A> aggregateEntity) {
+
+		Assert.notNull(items, "items must not be null");
+		Assert.state(aggregateEntity.isAggregateView(),
+				() -> aggregateEntity.getType().getName() + " is not an @AggregateTable class");
+
+		String sortKeyColumn = aggregateEntity.getAggregateSortKeyColumn();
+
+		A instance = instantiators.getInstantiatorFor(aggregateEntity).createInstance(aggregateEntity,
+				NoOpParameterValueProvider.INSTANCE);
+		ConvertingPropertyAccessor<A> accessor = newConvertingPropertyAccessor(instance, aggregateEntity);
+
+		for (DynamoDbPersistentProperty property : aggregateEntity) {
+			if (!property.isAggregateItem()) {
+				continue;
+			}
+			if (property.isCollectionLike()) {
+				accessor.setProperty(property, readAggregateItemList(items, sortKeyColumn, property));
+			}
+			else {
+				accessor.setProperty(property,
+						readAggregateChildSingle(items, sortKeyColumn, property, aggregateEntity));
+			}
+		}
+
+		return instance;
+	}
+
+	@Nullable
+	private Object readAggregateChildSingle(List<Map<String, AttributeValue>> items, String sortKeyColumn,
+			DynamoDbPersistentProperty property, DynamoDbPersistentEntity<?> aggregateEntity) {
+		sortKeyColumn = StringUtils.hasText(property.getAggregateItem().sortKey())
+				? property.getAggregateItem().sortKey()
+				: sortKeyColumn;
+		Class<?> rowType = transformClassToBeanClassLoaderClass(property.getType());
+		DynamoDbPersistentEntity<?> rowEntity = getMappingContext().getRequiredPersistentEntity(rowType);
+		AggregateItemMatcher matcher = AggregateItemMatcher.forProperty(property);
+
+		Object matched = null;
+		for (Map<String, AttributeValue> item : items) {
+			if (!matcher.matches(sortKeyValue(item, sortKeyColumn))) {
+				continue;
+			}
+			Assert.state(matched == null,
+					() -> aggregateEntity.getType().getName() + "." + property.getName()
+							+ " matched more than one item in the partition; a single-valued @AggregateItem "
+							+ "member must match at most one item -- use a List<> if more than one is expected");
+			matched = read(item, rowEntity);
+		}
+		return matched;
+	}
+
+	private List<Object> readAggregateItemList(List<Map<String, AttributeValue>> items, String sortKeyColumn,
+			DynamoDbPersistentProperty property) {
+
+		sortKeyColumn = StringUtils.hasText(property.getAggregateItem().sortKey())
+				? property.getAggregateItem().sortKey()
+				: sortKeyColumn;
+
+		Class<?> rowType = transformClassToBeanClassLoaderClass(
+				property.getTypeInformation().getRequiredComponentType().getType());
+		DynamoDbPersistentEntity<?> rowEntity = getMappingContext().getRequiredPersistentEntity(rowType);
+		AggregateItemMatcher matcher = AggregateItemMatcher.forProperty(property);
+
+		List<Object> matched = new ArrayList<>();
+		for (Map<String, AttributeValue> item : items) {
+			if (matcher.matches(sortKeyValue(item, sortKeyColumn))) {
+				matched.add(read(item, rowEntity));
+			}
+		}
+		return matched;
+	}
+
+	@Nullable
+	private static String sortKeyValue(Map<String, AttributeValue> item, String sortKeyColumn) {
+		AttributeValue value = item.get(sortKeyColumn);
+		return value != null ? value.s() : null;
+	}
+
+	private static final class AggregateItemMatcher {
+
+		private final String startsWith;
+		private final String endsWith;
+		private final @Nullable Pattern regex;
+
+		private AggregateItemMatcher(String startsWith, String endsWith, @Nullable Pattern regex) {
+			this.startsWith = startsWith;
+			this.endsWith = endsWith;
+			this.regex = regex;
+		}
+
+		static AggregateItemMatcher forProperty(DynamoDbPersistentProperty property) {
+			AggregateItem rule = property.getAggregateItem();
+			Assert.state(rule != null, () -> property.getName() + " has no @AggregateItem rule");
+			Pattern compiled = rule.regex() != null && !rule.regex().isEmpty() ? Pattern.compile(rule.regex()) : null;
+			return new AggregateItemMatcher(rule.startsWith(), rule.endsWith(), compiled);
+		}
+
+		boolean matches(@Nullable String sortKeyValue) {
+			if (sortKeyValue == null) {
+				return false;
+			}
+			if (regex != null && !regex.matcher(sortKeyValue).matches()) {
+				return false;
+			}
+			if (startsWith != null && !startsWith.isEmpty() && !sortKeyValue.startsWith(startsWith)) {
+				return false;
+			}
+			if (endsWith != null && !endsWith.isEmpty() && !sortKeyValue.endsWith(endsWith)) {
+				return false;
+			}
+			return true;
+		}
 	}
 
 	private Object resolvePropertyValue(DynamoDbPersistentProperty property, Map<String, AttributeValue> source,
@@ -393,7 +524,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		if (propertyValueConversions.hasValueConverter(property)) {
 			return readWithConverter(property, source.get(property.getColumnName()));
 		}
-		if (property.isSpecialType() && !property.serializeAsJson()) {
+		if (property.isSpecialType() && !property.serializeAsNestedMap()) {
 			return readInnerClass(property, source, owner);
 		}
 		Class<?> elementType = null;
@@ -401,7 +532,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			elementType = property.getTypeInformation().getComponentType().getType();
 		}
 		return fromAttributeValue(source.get(property.getColumnName()), property.getType(), elementType,
-				property.serializeAsJson());
+				property.serializeAsNestedMap());
 	}
 
 	private final class DynamoDbPropertyValueProvider implements PropertyValueProvider<DynamoDbPersistentProperty> {
@@ -430,8 +561,22 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			if (composedValue == null || composedValue.s() == null) {
 				continue;
 			}
+			KeyTemplate template = resolver.templateFor(column);
+			if (template != null && !matchesTemplate(composedValue.s(), template)) {
+				continue;
+			}
 			resolver.decomposeOnto(column, composedValue.s(), instance, getConversionService());
 		}
+	}
+
+	private static boolean matchesTemplate(String physical, KeyTemplate template) {
+		String raw = template.raw();
+		int firstPlaceholder = raw.indexOf('{');
+		if (firstPlaceholder > 0) {
+			String requiredPrefix = raw.substring(0, firstPlaceholder);
+			return physical.startsWith(requiredPrefix);
+		}
+		return true;
 	}
 
 	private <S> ConvertingPropertyAccessor<S> newConvertingPropertyAccessor(S source,
@@ -496,7 +641,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		}
 	}
 
-	public AttributeValue toAttributeValue(@Nullable Object value, boolean serializeAsJson) {
+	public AttributeValue toAttributeValue(@Nullable Object value, boolean serializeAsNestedMap) {
 		if (value == null) {
 			return AttributeValue.builder().nul(Boolean.TRUE).build();
 		}
@@ -564,7 +709,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			}
 			return AttributeValue.builder().m(attrs).build();
 		}
-		else if (serializeAsJson) {
+		else if (serializeAsNestedMap) {
 			return toNativeStructure(value);
 		}
 		else if (conversionService.canConvert(value.getClass(), AttributeValue.class)) {
@@ -582,7 +727,8 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		}
 		Map<String, AttributeValue> map = new LinkedHashMap<>();
 		for (Field field : fields) {
-			if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
+			if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())
+					|| field.isSynthetic()) {
 				continue;
 			}
 			field.setAccessible(true);
@@ -592,18 +738,19 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			}
 			catch (IllegalAccessException e) {
 				throw new MappingException("Cannot read field '" + field.getName() + "' of " + value.getClass()
-						+ " for serializeAsJson-style native structural encoding", e);
+						+ " for @InnerClass(serializeAsNestedMap = true) encoding", e);
 			}
 		}
 		return AttributeValue.builder().m(map).build();
 	}
 
-	private Object fromAttributeValue(@Nullable AttributeValue attributeValue, Class<?> type, boolean serializeAsJson) {
-		return fromAttributeValue(attributeValue, type, null, serializeAsJson);
+	private Object fromAttributeValue(@Nullable AttributeValue attributeValue, Class<?> type,
+			boolean serializeAsNestedMap) {
+		return fromAttributeValue(attributeValue, type, null, serializeAsNestedMap);
 	}
 
 	private Object fromAttributeValue(@Nullable AttributeValue attributeValue, Class<?> type,
-			@Nullable Class<?> elementType, boolean serializeAsJson) {
+			@Nullable Class<?> elementType, boolean serializeAsNestedMap) {
 		if (attributeValue == null || attributeValue.nul() != null) {
 			return null;
 		}
@@ -693,13 +840,13 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			}
 			attributeValue.m().forEach((key, value) -> {
 				if (value.hasL() || value.hasNs()) {
-					map.put(key, fromAttributeValue(value, List.class, serializeAsJson));
+					map.put(key, fromAttributeValue(value, List.class, serializeAsNestedMap));
 				}
 				else if (value.hasSs() || value.hasBs()) {
-					map.put(key, fromAttributeValue(value, Set.class, serializeAsJson));
+					map.put(key, fromAttributeValue(value, Set.class, serializeAsNestedMap));
 				}
 				else if (value.hasM()) {
-					map.put(key, fromAttributeValue(value, Map.class, serializeAsJson));
+					map.put(key, fromAttributeValue(value, Map.class, serializeAsNestedMap));
 				}
 				else if (value.nul() != null) {
 					map.put(key, null);
@@ -713,10 +860,10 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		else if (conversionService.canConvert(AttributeValue.class, type)) {
 			return this.conversionService.convert(attributeValue, type);
 		}
-		else if (serializeAsJson && attributeValue.hasM()) {
+		else if (serializeAsNestedMap && attributeValue.hasM()) {
 			return fromNativeStructure(attributeValue.m(), type);
 		}
-		else if (serializeAsJson && attributeValue.s() != null) {
+		else if (serializeAsNestedMap && attributeValue.s() != null) {
 			return attributeValue.s();
 		}
 		return null;
@@ -728,7 +875,8 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			constructor.setAccessible(true);
 			Object instance = constructor.newInstance();
 			for (Field field : type.getDeclaredFields()) {
-				if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
+				if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())
+						|| field.isSynthetic()) {
 					continue;
 				}
 				AttributeValue fieldValue = source.get(field.getName());
@@ -741,10 +889,9 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			return instance;
 		}
 		catch (ReflectiveOperationException e) {
-			throw new MappingException(
-					"Cannot reconstruct " + type
-							+ " from its native structural encoding (serializeAsJson) -- requires a no-arg constructor",
-					e);
+			throw new MappingException("Cannot reconstruct " + type
+					+ " from its nested-map encoding (@InnerClass(serializeAsNestedMap = true))"
+					+ " -- requires a no-arg constructor", e);
 		}
 	}
 

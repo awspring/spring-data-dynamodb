@@ -23,9 +23,15 @@ import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.SortKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.util.Collection;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-public class DynamoDbMappingContextTableEntitiesTest {
+class DynamoDbMappingContextTableEntitiesTest {
+
+	private static final String SHARED_TABLE_NAME = "shared_table";
+	private static final String DEDICATED_TABLE_NAME = "dedicated_table";
+	private static final String UNKNOWN_TABLE_NAME = "no_such_table";
 
 	@Table(tableName = "shared_table")
 	static class Tournament {
@@ -49,36 +55,53 @@ public class DynamoDbMappingContextTableEntitiesTest {
 		String pk;
 	}
 
-	@Test
-	void returnsAllEntitiesRegisteredForASharedTable() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Tournament.class);
-		mappingContext.getRequiredPersistentEntity(Match.class);
+	@Nested
+	@DisplayName("Shared table")
+	class SharedTable {
 
-		Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable("shared_table");
+		@Test
+		@DisplayName("Returns all entities registered for a shared table")
+		void getEntitiesForTable_sharedTable_returnsAll() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+			mappingContext.getRequiredPersistentEntity(Tournament.class);
+			mappingContext.getRequiredPersistentEntity(Match.class);
 
-		assertEquals(2, entities.size());
-		assertTrue(entities.stream().anyMatch(e -> e.getType().equals(Tournament.class)));
-		assertTrue(entities.stream().anyMatch(e -> e.getType().equals(Match.class)));
+			Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable(SHARED_TABLE_NAME);
+
+			assertAll("shared table entities", () -> assertEquals(2, entities.size()),
+					() -> assertTrue(entities.stream().anyMatch(e -> e.getType().equals(Tournament.class))),
+					() -> assertTrue(entities.stream().anyMatch(e -> e.getType().equals(Match.class))));
+		}
 	}
 
-	@Test
-	void returnsSingleEntityForADedicatedTable() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(SoloEntity.class);
+	@Nested
+	@DisplayName("Dedicated table")
+	class DedicatedTable {
 
-		Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable("dedicated_table");
+		@Test
+		@DisplayName("Returns single entity for a dedicated table")
+		void getEntitiesForTable_dedicatedTable_returnsSingleEntity() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+			mappingContext.getRequiredPersistentEntity(SoloEntity.class);
 
-		assertEquals(1, entities.size());
+			Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable(DEDICATED_TABLE_NAME);
+
+			assertEquals(1, entities.size());
+		}
 	}
 
-	@Test
-	void returnsEmptyCollectionForAnUnknownTableRatherThanNull() {
-		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
+	@Nested
+	@DisplayName("Unknown table")
+	class UnknownTable {
 
-		Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable("no_such_table");
+		@Test
+		@DisplayName("Returns empty collection for an unknown table rather than null")
+		void getEntitiesForTable_unknownTable_returnsEmptyCollection() {
+			DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
 
-		assertNotNull(entities);
-		assertTrue(entities.isEmpty());
+			Collection<DynamoDbPersistentEntity<?>> entities = mappingContext.getEntitiesForTable(UNKNOWN_TABLE_NAME);
+
+			assertAll("unknown table result", () -> assertNotNull(entities), () -> assertTrue(entities.isEmpty()));
+		}
 	}
 }

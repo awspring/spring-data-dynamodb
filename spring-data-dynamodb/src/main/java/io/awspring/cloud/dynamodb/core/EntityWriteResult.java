@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.core;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class EntityWriteResult<T> extends WriteResult {
 
 	private final T entity;

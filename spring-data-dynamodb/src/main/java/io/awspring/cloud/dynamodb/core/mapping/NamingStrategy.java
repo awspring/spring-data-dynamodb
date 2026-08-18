@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.core.mapping;
 
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public interface NamingStrategy {
 
 	NamingStrategy INSTANCE = new NamingStrategy() {

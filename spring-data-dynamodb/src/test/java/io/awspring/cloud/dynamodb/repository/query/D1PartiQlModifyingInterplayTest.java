@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -31,6 +32,8 @@ import io.awspring.cloud.dynamodb.repository.Query;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Properties;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -44,9 +47,12 @@ import org.springframework.data.repository.query.QueryLookupStrategy;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-public class D1PartiQlModifyingInterplayTest {
+@DisplayName("D1 PartiQL / @Modifying interplay with eager scan check")
+class D1PartiQlModifyingInterplayTest {
 
-	@Table(tableName = "orders")
+	private static final String TABLE_NAME = "orders";
+
+	@Table(tableName = TABLE_NAME)
 	static class Match {
 		@PartitionKey
 		String tournamentId;
@@ -105,44 +111,68 @@ public class D1PartiQlModifyingInterplayTest {
 				namedQueries);
 	}
 
-	@Test
-	void partiQlMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
-		DynamoDbQueryMethod queryMethod = queryMethodFor("byTournament", String.class);
-		assertTrue(queryMethod.isPartiQlQuery(), "PartiQL method must classify as PartiQL");
-		assertTrue(queryMethod.hasAnnotatedQuery(),
-				"A PartiQL method carries @Query, so the factory routes it to StringBasedDynamoDbQuery");
+	@Nested
+	@DisplayName("Query method classification")
+	class ClassificationTests {
+
+		@Test
+		@DisplayName("PartiQL method is annotated query and takes the StringBased branch")
+		void partiQlMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
+			DynamoDbQueryMethod queryMethod = queryMethodFor("byTournament", String.class);
+
+			assertAll(() -> assertTrue(queryMethod.isPartiQlQuery(), "PartiQL method must classify as PartiQL"),
+					() -> assertTrue(queryMethod.hasAnnotatedQuery(),
+							"A PartiQL method carries @Query, so the factory routes it to StringBasedDynamoDbQuery"));
+		}
+
+		@Test
+		@DisplayName("@Modifying method is annotated query and takes the StringBased branch")
+		void modifyingMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
+			DynamoDbQueryMethod queryMethod = queryMethodFor("updateStatus", String.class, String.class);
+
+			assertAll(() -> assertTrue(queryMethod.isModifyingQuery(), "@Modifying method must classify as modifying"),
+					() -> assertTrue(queryMethod.hasAnnotatedQuery(),
+							"A @Modifying update carries @Query(updateExpression=...), so the factory routes it to StringBasedDynamoDbQuery"));
+		}
 	}
 
-	@Test
-	void modifyingMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
-		DynamoDbQueryMethod queryMethod = queryMethodFor("updateStatus", String.class, String.class);
-		assertTrue(queryMethod.isModifyingQuery(), "@Modifying method must classify as modifying");
-		assertTrue(queryMethod.hasAnnotatedQuery(),
-				"A @Modifying update carries @Query(updateExpression=...), so the factory routes it to StringBasedDynamoDbQuery");
-	}
+	@Nested
+	@DisplayName("Factory dispatch")
+	class FactoryDispatchTests {
 
-	@Test
-	void factoryDispatchesPartiQlMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
-		RepositoryQuery query = resolveVia(newOperations(), "byTournament", String.class);
-		assertInstanceOf(StringBasedDynamoDbQuery.class, query,
-				"PartiQL method must be served by StringBasedDynamoDbQuery");
-		assertFalse(query instanceof PartTreeDynamoDbQuery,
-				"PartiQL method must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)");
-	}
+		@Test
+		@DisplayName("PartiQL method dispatches to StringBased, never PartTree")
+		void factoryDispatchesPartiQlMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
+			RepositoryQuery query = resolveVia(newOperations(), "byTournament", String.class);
 
-	@Test
-	void factoryDispatchesModifyingMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
-		RepositoryQuery query = resolveVia(newOperations(), "updateStatus", String.class, String.class);
-		assertInstanceOf(StringBasedDynamoDbQuery.class, query,
-				"@Modifying update must be served by StringBasedDynamoDbQuery");
-		assertFalse(query instanceof PartTreeDynamoDbQuery,
-				"@Modifying update must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)");
-	}
+			assertAll(
+					() -> assertInstanceOf(StringBasedDynamoDbQuery.class, query,
+							"PartiQL method must be served by StringBasedDynamoDbQuery"),
+					() -> assertFalse(query instanceof PartTreeDynamoDbQuery,
+							"PartiQL method must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)"));
+		}
 
-	@Test
-	void stringBasedConstructionDoesNoEagerScanCheckEvenForAScanShapedQuery() throws NoSuchMethodException {
-		RepositoryQuery query = resolveVia(newOperations(), "scanByStatus", String.class);
-		assertNotNull(query, "StringBasedDynamoDbQuery constructs a scan-shaped @Query without any eager check");
-		assertInstanceOf(StringBasedDynamoDbQuery.class, query);
+		@Test
+		@DisplayName("@Modifying method dispatches to StringBased, never PartTree")
+		void factoryDispatchesModifyingMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
+			RepositoryQuery query = resolveVia(newOperations(), "updateStatus", String.class, String.class);
+
+			assertAll(
+					() -> assertInstanceOf(StringBasedDynamoDbQuery.class, query,
+							"@Modifying update must be served by StringBasedDynamoDbQuery"),
+					() -> assertFalse(query instanceof PartTreeDynamoDbQuery,
+							"@Modifying update must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)"));
+		}
+
+		@Test
+		@DisplayName("StringBased construction does no eager scan check even for a scan-shaped query")
+		void stringBasedConstructionDoesNoEagerScanCheckEvenForAScanShapedQuery() throws NoSuchMethodException {
+			RepositoryQuery query = resolveVia(newOperations(), "scanByStatus", String.class);
+
+			assertAll(
+					() -> assertNotNull(query,
+							"StringBasedDynamoDbQuery constructs a scan-shaped @Query without any eager check"),
+					() -> assertInstanceOf(StringBasedDynamoDbQuery.class, query));
+		}
 	}
 }

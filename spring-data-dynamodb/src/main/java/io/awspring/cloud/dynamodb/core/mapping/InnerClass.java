@@ -27,5 +27,7 @@ public @interface InnerClass {
 
 	String endsWith() default "";
 
-	boolean serializeAsJson() default false;
+	String regex() default "";
+
+	boolean serializeAsNestedMap() default false;
 }

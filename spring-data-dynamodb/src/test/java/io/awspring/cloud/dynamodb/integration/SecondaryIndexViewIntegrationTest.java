@@ -15,6 +15,11 @@
  */
 package io.awspring.cloud.dynamodb.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import io.awspring.cloud.dynamodb.LocalStackTestContainer;
 import io.awspring.cloud.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.cloud.dynamodb.core.DynamoDbOperations;
@@ -30,9 +35,10 @@ import io.awspring.cloud.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -63,6 +69,11 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 	private static final String GSI1 = "GSI1";
 	private static final String REGION_LSI = "by_region";
 	private static final String ROUND_INDEX = "by_round";
+	private static final String TOURNAMENT_ID = "1";
+	private static final String TOURNAMENT_PK = "TOURNAMENT#" + TOURNAMENT_ID;
+	private static final String PLAYER_ID = "p1";
+	private static final String PLAYER_NAME = "Alice";
+	private static final String MATCH_REGION = "NA-EAST";
 
 	private DynamoDbClient dynamoDbClient;
 	private AnnotationConfigApplicationContext context;
@@ -385,77 +396,106 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 	}
 
 	private void seedArena() {
-		baseRepository.save(ArenaItem.tournament("1", "Winter Championship"));
-		baseRepository.save(ArenaItem.player("1", "p1", "Alice"));
-		baseRepository.save(ArenaItem.match("1", "p1", "m1", "SEMIFINALS", "NA-EAST"));
-		baseRepository.save(ArenaItem.match("1", "p1", "m2", "FINALS", "NA-EAST"));
-		baseRepository.save(ArenaItem.result("1", "m1", "p1"));
+		baseRepository.save(ArenaItem.tournament(TOURNAMENT_ID, "Winter Championship"));
+		baseRepository.save(ArenaItem.player(TOURNAMENT_ID, PLAYER_ID, PLAYER_NAME));
+		baseRepository.save(ArenaItem.match(TOURNAMENT_ID, PLAYER_ID, "m1", "SEMIFINALS", MATCH_REGION));
+		baseRepository.save(ArenaItem.match(TOURNAMENT_ID, PLAYER_ID, "m2", "FINALS", MATCH_REGION));
+		baseRepository.save(ArenaItem.result(TOURNAMENT_ID, "m1", PLAYER_ID));
 	}
 
-	@Test
-	void polymorphicContainerViewReconstructsPlayerAndMatchRowsByOverloadedSortKeyPrefix() {
-		seedArena();
+	@Nested
+	@DisplayName("GSI polymorphic view")
+	class GsiPolymorphicView {
 
-		List<PlayerInTournamentView> rows = gsi1Repository.findByCollectionKey("PT#1#p1");
+		@Test
+		@DisplayName("GSI view reconstructs player and match rows by overloaded sort-key prefix")
+		void findByCollectionKey_playerCollection_routesByPrefix() {
+			seedArena();
 
-		Assertions.assertEquals(3, rows.size(), "player p1's GSI1 collection: itself + 2 matches");
-		PlayerInTournamentView playerRow = rows.stream().filter(r -> r.getPlayer() != null).findFirst()
-				.orElseThrow(() -> new AssertionError("expected one row to reconstruct as a Player"));
-		Assertions.assertNull(playerRow.getMatch(), "a PLAYER# row must not also populate the match field");
-		Assertions.assertEquals("Alice", playerRow.getPlayer().getName());
+			List<PlayerInTournamentView> rows = gsi1Repository
+					.findByCollectionKey("PT#" + TOURNAMENT_ID + "#" + PLAYER_ID);
 
-		long matchRows = rows.stream().filter(r -> r.getMatch() != null).count();
-		Assertions.assertEquals(2, matchRows, "both of p1's matches share the same GSI1 collection key");
+			assertEquals(3, rows.size(), "player p1's GSI1 collection: itself + 2 matches");
+			PlayerInTournamentView playerRow = rows.stream().filter(r -> r.getPlayer() != null).findFirst()
+					.orElseThrow(() -> new AssertionError("expected one row to reconstruct as a Player"));
+			assertAll("player row routing",
+					() -> assertNull(playerRow.getMatch(), "a PLAYER# row must not also populate the match field"),
+					() -> assertEquals(PLAYER_NAME, playerRow.getPlayer().getName()));
+
+			long matchRows = rows.stream().filter(r -> r.getMatch() != null).count();
+			assertEquals(2, matchRows, "both of p1's matches share the same GSI1 collection key");
+		}
+
+		@Test
+		@DisplayName("base table reconstructs all four polymorphic kinds with no type attribute")
+		void findByPk_allKinds_reconstructsEach() {
+			seedArena();
+
+			List<ArenaItem> items = baseRepository.findByPk(TOURNAMENT_PK);
+
+			assertAll("all polymorphic kinds present", () -> assertEquals(5, items.size()),
+					() -> assertEquals(1, items.stream().filter(i -> i.tournament != null).count()),
+					() -> assertEquals(1, items.stream().filter(i -> i.player != null).count()),
+					() -> assertEquals(2, items.stream().filter(i -> i.match != null).count()),
+					() -> assertEquals(1, items.stream().filter(i -> i.result != null).count()));
+		}
 	}
 
-	@Test
-	void baseTableItselfReconstructsAllFourPolymorphicKindsWithNoTypeAttribute() {
-		seedArena();
+	@Nested
+	@DisplayName("LSI view")
+	class LsiView {
 
-		List<ArenaItem> items = baseRepository.findByPk("TOURNAMENT#1");
+		@Test
+		@DisplayName("typed view over LSI shares the base partition key and queries its own sort attribute")
+		void findByPkAndRegion_lsi_returnsByRegion() {
+			seedArena();
 
-		Assertions.assertEquals(5, items.size());
-		Assertions.assertEquals(1, items.stream().filter(i -> i.tournament != null).count());
-		Assertions.assertEquals(1, items.stream().filter(i -> i.player != null).count());
-		Assertions.assertEquals(2, items.stream().filter(i -> i.match != null).count());
-		Assertions.assertEquals(1, items.stream().filter(i -> i.result != null).count());
+			List<MatchByRegion> found = byRegionRepository.findByPkAndRegion(TOURNAMENT_PK, MATCH_REGION);
+
+			assertEquals(2, found.size(), "both matches under TOURNAMENT#1 are NA-EAST");
+		}
 	}
 
-	@Test
-	void typedViewOverLsiSharesTheBasePartitionKeyAndQueriesItsOwnSortAttribute() {
-		seedArena();
+	@Nested
+	@DisplayName("Multi-attribute GSI")
+	class MultiAttributeGsi {
 
-		List<MatchByRegion> found = byRegionRepository.findByPkAndRegion("TOURNAMENT#1", "NA-EAST");
+		@Test
+		@DisplayName("typed view over multi-attribute GSI matches on both key attributes")
+		void findByTournamentPkAndRound_multiAttrGsi_matchesBothKeys() {
+			Assumptions.assumeTrue(multiAttributeGsiSupported,
+					"this LocalStack build does not support the Nov-2025 multi-attribute GSI-key feature "
+							+ "-- skipping rather than failing the acceptance suite for an "
+							+ "infra limitation unrelated to the module's own code");
+			seedArena();
 
-		Assertions.assertEquals(2, found.size(), "both matches under TOURNAMENT#1 are NA-EAST");
+			List<MatchByRound> found = byRoundRepository.findByTournamentPkAndRound(TOURNAMENT_PK, "SEMIFINALS");
+
+			assertAll("multi-attribute GSI query", () -> assertEquals(1, found.size()),
+					() -> assertEquals("SEMIFINALS", found.get(0).getRound()));
+		}
 	}
 
-	@Test
-	void typedViewOverMultiAttributeGsiMatchesOnBothKeyAttributes() {
-		Assumptions.assumeTrue(multiAttributeGsiSupported,
-				"this LocalStack build does not support the Nov-2025 multi-attribute GSI-key feature "
-						+ "-- skipping rather than failing the acceptance suite for an "
-						+ "infra limitation unrelated to the module's own code");
-		seedArena();
+	@Nested
+	@DisplayName("Read-only enforcement")
+	class ReadOnlyEnforcement {
 
-		List<MatchByRound> found = byRoundRepository.findByTournamentPkAndRound("TOURNAMENT#1", "SEMIFINALS");
+		@Test
+		@DisplayName("save on a typed view is rejected")
+		void save_secondaryIndexView_throws() {
+			MatchByRegion view = new MatchByRegion();
+			view.pk = TOURNAMENT_PK;
+			view.region = MATCH_REGION;
 
-		Assertions.assertEquals(1, found.size());
-		Assertions.assertEquals("SEMIFINALS", found.get(0).getRound());
-	}
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> context.getBean(DynamoDbOperations.class).save(view));
+		}
 
-	@Test
-	void saveOnATypedViewIsRejected() {
-		MatchByRegion view = new MatchByRegion();
-		view.pk = "TOURNAMENT#1";
-		view.region = "NA-EAST";
-		Assertions.assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> context.getBean(DynamoDbOperations.class).save(view));
-	}
-
-	@Test
-	void findByIdOnATypedViewIsRejected() {
-		Assertions.assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> context.getBean(DynamoDbOperations.class).findById("TOURNAMENT#1", MatchByRegion.class));
+		@Test
+		@DisplayName("findById on a typed view is rejected")
+		void findById_secondaryIndexView_throws() {
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> context.getBean(DynamoDbOperations.class).findById(TOURNAMENT_PK, MatchByRegion.class));
+		}
 	}
 }

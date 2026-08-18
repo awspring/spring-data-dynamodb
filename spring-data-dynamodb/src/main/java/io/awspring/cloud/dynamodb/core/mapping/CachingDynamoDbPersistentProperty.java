@@ -17,10 +17,18 @@ package io.awspring.cloud.dynamodb.core.mapping;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import org.jspecify.annotations.Nullable;
 import org.springframework.data.mapping.MappingException;
 import org.springframework.data.mapping.model.Property;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
+import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentProperty {
 
 	private final boolean isEmbedded;
@@ -30,7 +38,9 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 
 	private String endsWith;
 
-	private boolean serializeAsJson = false;
+	private @Nullable Pattern regexPattern;
+
+	private boolean serializeAsNestedMap = false;
 
 	private boolean isSpecialType = false;
 
@@ -47,9 +57,11 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 					this.typeOfProperty = Class.forName(((Class) t).getName());
 				}
 				else if (property.getField().get().isAnnotationPresent(InnerClass.class)) {
-					startsWith = property.getField().get().getAnnotation(InnerClass.class).startsWith();
-					endsWith = property.getField().get().getAnnotation(InnerClass.class).endsWith();
-					serializeAsJson = property.getField().get().getAnnotation(InnerClass.class).serializeAsJson();
+					InnerClass innerClass = property.getField().get().getAnnotation(InnerClass.class);
+					startsWith = innerClass.startsWith();
+					endsWith = innerClass.endsWith();
+					regexPattern = compile(innerClass.regex(), property);
+					serializeAsNestedMap = innerClass.serializeAsNestedMap();
 					this.typeOfProperty = Class.forName(((Class) ty).getName());
 					this.isSpecialType = true;
 				}
@@ -63,6 +75,20 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 		}
 	}
 
+	@Nullable
+	private static Pattern compile(String regex, Property property) {
+		if (!StringUtils.hasText(regex)) {
+			return null;
+		}
+		try {
+			return Pattern.compile(regex);
+		}
+		catch (PatternSyntaxException e) {
+			throw new MappingException(
+					"@InnerClass(regex = \"" + regex + "\") on " + property + " is not a valid regular expression", e);
+		}
+	}
+
 	@Override
 	public String startsWith() {
 		return this.startsWith;
@@ -71,6 +97,12 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 	@Override
 	public String endsWith() {
 		return this.endsWith;
+	}
+
+	@Override
+	@Nullable
+	public Pattern regexPattern() {
+		return this.regexPattern;
 	}
 
 	@Override
@@ -89,7 +121,7 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 	}
 
 	@Override
-	public boolean serializeAsJson() {
-		return this.serializeAsJson;
+	public boolean serializeAsNestedMap() {
+		return this.serializeAsNestedMap;
 	}
 }

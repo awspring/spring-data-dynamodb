@@ -24,6 +24,10 @@ import org.springframework.data.repository.core.support.RepositoryFactoryBeanSup
 import org.springframework.data.repository.core.support.RepositoryFactorySupport;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DynamoDbRepositoryFactoryBean<T extends Repository<S, ID>, S, ID>
 		extends RepositoryFactoryBeanSupport<T, S, ID> {
 

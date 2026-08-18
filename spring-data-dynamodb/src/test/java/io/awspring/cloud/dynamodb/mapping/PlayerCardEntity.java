@@ -20,6 +20,10 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import java.time.LocalDate;
 import java.util.*;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "playerCardEntity")
 public class PlayerCardEntity {
 

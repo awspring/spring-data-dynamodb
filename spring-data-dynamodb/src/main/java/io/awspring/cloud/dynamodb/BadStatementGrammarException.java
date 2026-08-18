@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb;
 
 import org.springframework.dao.InvalidDataAccessResourceUsageException;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @SuppressWarnings("serial")
 public class BadStatementGrammarException extends InvalidDataAccessResourceUsageException {
 

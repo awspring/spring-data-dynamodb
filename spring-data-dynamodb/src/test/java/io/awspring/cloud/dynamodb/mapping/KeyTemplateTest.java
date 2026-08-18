@@ -21,9 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import io.awspring.cloud.dynamodb.core.mapping.KeyTemplate;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-public class KeyTemplateTest {
+@DisplayName("KeyTemplate -- parse / compose / decompose / prefix")
+class KeyTemplateTest {
 
 	@Test
 	void parsesLiteralAndPlaceholderSegmentsInOrder() {

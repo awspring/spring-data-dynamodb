@@ -15,6 +15,10 @@
  */
 package io.awspring.cloud.dynamodb.entities.arena;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public enum MatchStatus {
 
 	SCHEDULED("SCHEDULED"), LIVE("LIVE"), COMPLETED("COMPLETED");

@@ -15,34 +15,64 @@
  */
 package io.awspring.cloud.dynamodb.config;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.cloud.dynamodb.core.converter.DynamoDbConversions;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.convert.converter.Converter;
 
+@DisplayName("AbstractDynamoDbConfiguration — custom conversions")
 class AbstractDynamoDbConfigurationCustomConversionsTest {
 
-	@Test
-	void defaultConfigurationRegistersNoCustomConverters() {
+	@Nested
+	@DisplayName("Default configuration")
+	class DefaultConfiguration {
 
-		TestConfiguration configuration = new TestConfiguration();
+		private final TestConfiguration configuration = new TestConfiguration();
 
-		assertThat(configuration.customConverters()).isEmpty();
-		assertThat(configuration.customConversions()).isNotNull();
+		@Test
+		@DisplayName("registers no custom converters and provides a non-null DynamoDbConversions bean")
+		void customConverters_default_emptyListAndNonNullConversions() {
+
+			// Act
+			List<?> converters = configuration.customConverters();
+			DynamoDbConversions conversions = configuration.customConversions();
+
+			// Assert
+			assertAll(() -> assertTrue(converters.isEmpty(), "customConverters() should return an empty list"),
+					() -> assertNotNull(conversions, "customConversions() should not be null"));
+		}
 	}
 
-	@Test
-	void subclassCanContributeConvertersViaCustomConverters() {
+	@Nested
+	@DisplayName("Subclass contributing converters")
+	class SubclassWithCustomConverters {
 
-		CustomConvertersConfiguration configuration = new CustomConvertersConfiguration();
+		private final CustomConvertersConfiguration configuration = new CustomConvertersConfiguration();
 
-		DynamoDbConversions conversions = configuration.customConversions();
+		@Test
+		@DisplayName("exposes contributed converter and DynamoDbConversions recognises its write target")
+		void customConverters_withStringBuilderConverter_registeredAndRecognised() {
 
-		assertThat(configuration.customConverters()).hasSize(1);
-		assertThat(conversions.hasCustomWriteTarget(StringBuilder.class, String.class)).isTrue();
+			// Act
+			List<?> converters = configuration.customConverters();
+			DynamoDbConversions conversions = configuration.customConversions();
+
+			// Assert
+			assertAll(
+					() -> assertEquals(1, converters.size(), "customConverters() should contain exactly one converter"),
+					() -> assertTrue(conversions.hasCustomWriteTarget(StringBuilder.class, String.class),
+							"DynamoDbConversions should recognise StringBuilder->String write target"));
+		}
 	}
+
+	// --- Test fixtures ---
 
 	static class TestConfiguration extends AbstractDynamoDbConfiguration {
 	}

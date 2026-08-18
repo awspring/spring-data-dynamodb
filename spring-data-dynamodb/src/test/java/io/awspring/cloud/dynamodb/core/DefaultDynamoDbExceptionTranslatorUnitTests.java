@@ -15,11 +15,14 @@
  */
 package io.awspring.cloud.dynamodb.core;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import io.awspring.cloud.dynamodb.BadStatementGrammarException;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.NonTransientDataAccessException;
 import org.springframework.dao.TransientDataAccessResourceException;
@@ -31,66 +34,81 @@ import software.amazon.awssdk.services.dynamodb.model.RequestLimitExceededExcept
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 
+@DisplayName("DefaultDynamoDbExceptionTranslator -- maps AWS SDK exceptions to Spring DataAccessExceptions")
 class DefaultDynamoDbExceptionTranslatorUnitTests {
 
-	DefaultDynamoDbExceptionTranslator translator = new DefaultDynamoDbExceptionTranslator();
+	private final DefaultDynamoDbExceptionTranslator translator = new DefaultDynamoDbExceptionTranslator();
 
 	@Test
-	void translatesDuplicateItemException() {
+	@DisplayName("DuplicateItemException -> DuplicateKeyException (cause preserved)")
+	void translate_duplicateItemException_becomesDuplicateKeyException() {
+		// Act
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(DuplicateItemException.builder().message("foo").build());
 
-		assertThat(translator.translateExceptionIfPossible(DuplicateItemException.builder().message("foo").build()))
-				.isInstanceOf(DuplicateKeyException.class).hasCauseInstanceOf(DuplicateItemException.class);
+		// Assert
+		assertAll(() -> assertInstanceOf(DuplicateKeyException.class, translated),
+				() -> assertInstanceOf(DuplicateItemException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesTransactionConflictException() {
+	@DisplayName("TransactionConflictException -> ConcurrencyFailureException (cause preserved)")
+	void translate_transactionConflictException_becomesConcurrencyFailure() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(TransactionConflictException.builder().message("foo").build());
 
-		assertThat(
-				translator.translateExceptionIfPossible(TransactionConflictException.builder().message("foo").build()))
-				.isInstanceOf(ConcurrencyFailureException.class).hasCauseInstanceOf(TransactionConflictException.class);
+		assertAll(() -> assertInstanceOf(ConcurrencyFailureException.class, translated),
+				() -> assertInstanceOf(TransactionConflictException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesConditionalCheckFailedException() {
+	@DisplayName("ConditionalCheckFailedException -> ConcurrencyFailureException (cause preserved)")
+	void translate_conditionalCheckFailedException_becomesConcurrencyFailure() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(ConditionalCheckFailedException.builder().message("foo").build());
 
-		assertThat(translator
-				.translateExceptionIfPossible(ConditionalCheckFailedException.builder().message("foo").build()))
-				.isInstanceOf(ConcurrencyFailureException.class)
-				.hasCauseInstanceOf(ConditionalCheckFailedException.class);
+		assertAll(() -> assertInstanceOf(ConcurrencyFailureException.class, translated),
+				() -> assertInstanceOf(ConditionalCheckFailedException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesProvisionedThroughputExceededException() {
+	@DisplayName("ProvisionedThroughputExceededException -> TransientDataAccessResourceException (cause preserved)")
+	void translate_provisionedThroughputExceeded_becomesTransientResource() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(ProvisionedThroughputExceededException.builder().message("foo").build());
 
-		assertThat(translator
-				.translateExceptionIfPossible(ProvisionedThroughputExceededException.builder().message("foo").build()))
-				.isInstanceOf(TransientDataAccessResourceException.class)
-				.hasCauseInstanceOf(ProvisionedThroughputExceededException.class);
+		assertAll(() -> assertInstanceOf(TransientDataAccessResourceException.class, translated),
+				() -> assertInstanceOf(ProvisionedThroughputExceededException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesItemCollectionSizeLimitExceededException() {
+	@DisplayName("ItemCollectionSizeLimitExceededException -> TransientDataAccessResourceException (cause preserved)")
+	void translate_itemCollectionSizeLimitExceeded_becomesTransientResource() {
+		DataAccessException translated = translator.translateExceptionIfPossible(
+				ItemCollectionSizeLimitExceededException.builder().message("foo").build());
 
-		assertThat(translator.translateExceptionIfPossible(
-				ItemCollectionSizeLimitExceededException.builder().message("foo").build()))
-				.isInstanceOf(TransientDataAccessResourceException.class)
-				.hasCauseInstanceOf(ItemCollectionSizeLimitExceededException.class);
+		assertAll(() -> assertInstanceOf(TransientDataAccessResourceException.class, translated),
+				() -> assertInstanceOf(ItemCollectionSizeLimitExceededException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesRequestLimitExceededException() {
+	@DisplayName("RequestLimitExceededException -> NonTransientDataAccessException (cause preserved)")
+	void translate_requestLimitExceeded_becomesNonTransient() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(RequestLimitExceededException.builder().message("foo").build());
 
-		assertThat(
-				translator.translateExceptionIfPossible(RequestLimitExceededException.builder().message("foo").build()))
-				.isInstanceOf(NonTransientDataAccessException.class)
-				.hasCauseInstanceOf(RequestLimitExceededException.class);
+		assertAll(() -> assertInstanceOf(NonTransientDataAccessException.class, translated),
+				() -> assertInstanceOf(RequestLimitExceededException.class, translated.getCause()));
 	}
 
 	@Test
-	void translatesResourceNotFoundException() {
+	@DisplayName("ResourceNotFoundException -> BadStatementGrammarException (cause preserved)")
+	void translate_resourceNotFound_becomesBadStatementGrammar() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(ResourceNotFoundException.builder().message("foo").build());
 
-		assertThat(translator.translateExceptionIfPossible(ResourceNotFoundException.builder().message("foo").build()))
-				.isInstanceOf(BadStatementGrammarException.class).hasCauseInstanceOf(ResourceNotFoundException.class);
+		assertAll(() -> assertInstanceOf(BadStatementGrammarException.class, translated),
+				() -> assertInstanceOf(ResourceNotFoundException.class, translated.getCause()));
 	}
 
 }

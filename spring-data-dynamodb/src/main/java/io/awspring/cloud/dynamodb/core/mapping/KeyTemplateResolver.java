@@ -26,6 +26,10 @@ import org.springframework.data.mapping.model.ConvertingPropertyAccessor;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public final class KeyTemplateResolver {
 
 	private final DynamoDbPersistentEntity<?> entity;

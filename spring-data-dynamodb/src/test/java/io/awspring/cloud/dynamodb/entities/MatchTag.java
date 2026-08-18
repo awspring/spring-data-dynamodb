@@ -18,6 +18,10 @@ package io.awspring.cloud.dynamodb.entities;
 import io.awspring.cloud.dynamodb.core.mapping.PartitionKey;
 import io.awspring.cloud.dynamodb.core.mapping.Table;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "matchTagTable")
 public class MatchTag {
 

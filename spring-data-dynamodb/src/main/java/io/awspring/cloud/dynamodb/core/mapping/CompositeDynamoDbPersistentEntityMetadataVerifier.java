@@ -20,6 +20,10 @@ import java.util.Collection;
 import org.springframework.data.mapping.MappingException;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class CompositeDynamoDbPersistentEntityMetadataVerifier implements DynamoDbPersistentEntityMetadataVerifier {
 
 	private final Collection<DynamoDbPersistentEntityMetadataVerifier> verifiers;

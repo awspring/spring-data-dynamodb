@@ -33,27 +33,31 @@ import software.amazon.awssdk.services.dynamodb.model.RequestLimitExceededExcept
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class DefaultDynamoDbExceptionTranslator implements DynamoDbExceptionTranslator {
 
 	@Override
 	public @Nullable DataAccessException translateExceptionIfPossible(RuntimeException ex) {
-
-		if (ex instanceof DataAccessException) {
-			return (DataAccessException) ex;
-		}
-
-		return translate(null, null, ex);
+		return doTranslate(null, null, ex);
 	}
 
 	@Override
 	public @Nullable DataAccessException translate(@Nullable String task, @Nullable String statement,
 			RuntimeException ex) {
+		return doTranslate(task, statement, ex);
+	}
 
-		String message = buildMessage(task, statement, ex);
+	private @Nullable DataAccessException doTranslate(@Nullable String task, @Nullable String statement,
+			RuntimeException ex) {
 
 		if (ex instanceof DataAccessException) {
 			return (DataAccessException) ex;
 		}
+
+		String message = buildMessage(task, statement, ex);
 
 		if (ex instanceof DuplicateItemException) {
 			return new DuplicateKeyException(message, ex);

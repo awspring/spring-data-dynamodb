@@ -22,6 +22,10 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.data.repository.core.support.PersistentEntityInformation;
 import org.springframework.util.Assert;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class MappingDynamoDbEntityInformation<T, ID> extends PersistentEntityInformation<T, ID>
 		implements DynamoDbEntityInformation<T, ID> {
 

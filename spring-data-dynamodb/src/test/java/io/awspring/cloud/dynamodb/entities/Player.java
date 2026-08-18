@@ -17,6 +17,10 @@ package io.awspring.cloud.dynamodb.entities;
 
 import java.time.LocalDate;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 public class Player {
 
 	private String gamerTag;

@@ -15,6 +15,7 @@
  */
 package io.awspring.cloud.dynamodb.repository.query;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,6 +29,8 @@ import io.awspring.cloud.dynamodb.core.mapping.Table;
 import io.awspring.cloud.dynamodb.repository.Query;
 import java.lang.reflect.Method;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -37,9 +40,17 @@ import org.springframework.data.repository.core.support.DefaultRepositoryMetadat
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-public class StringBasedDynamoDbQueryTest {
+@DisplayName("StringBasedDynamoDbQuery")
+class StringBasedDynamoDbQueryTest {
 
-	@Table(tableName = "widgets")
+	private static final String TABLE_NAME = "widgets";
+	private static final String INDEX_NAME = "gsi1";
+	private static final String PK_CUST_1 = "cust-1";
+	private static final String PK_CUST_2 = "cust-2";
+	private static final String PK_CUST_9 = "cust-9";
+	private static final String ROUND_ACTIVE = "ACTIVE";
+
+	@Table(tableName = TABLE_NAME)
 	static class Widget {
 		@PartitionKey
 		String pk;
@@ -50,10 +61,10 @@ public class StringBasedDynamoDbQueryTest {
 
 	interface WidgetRepository extends Repository<Widget, String> {
 
-		@Query(keyConditionExpression = "pk = :pk", indexName = "gsi1")
+		@Query(keyConditionExpression = "pk = :pk", indexName = INDEX_NAME)
 		List<Widget> rawByPk(@Param("pk") String pk);
 
-		@Query(keyConditionExpression = "pk = :0", indexName = "gsi1")
+		@Query(keyConditionExpression = "pk = :0", indexName = INDEX_NAME)
 		List<Widget> rawByPositional(String pk);
 
 		@Query(filterExpression = "#s = :round", allowScan = true)
@@ -79,54 +90,84 @@ public class StringBasedDynamoDbQueryTest {
 		return new PartTreeDynamoDbQueryReplayTest.CapturingOperations(converter);
 	}
 
-	@Test
-	void keyConditionExpressionWithIndexNameProducesARawResolvedQueryRequest() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "rawByPk", String.class);
+	@Nested
+	@DisplayName("Named and positional parameter binding on the query path")
+	class QueryPathBindingTests {
 
-		query.execute(new Object[] { "cust-1" });
+		@Test
+		@DisplayName("keyConditionExpression with indexName produces a query request with resolved values")
+		void keyConditionExpressionWithIndexNameProducesARawResolvedQueryRequest() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "rawByPk", String.class);
 
-		assertNotNull(operations.lastCapturedRequest);
-		assertEquals("gsi1", operations.lastCapturedRequest.getIndexName());
-		assertEquals("pk = :pk", operations.lastCapturedRequest.getKeyConditionExpression());
-		assertEquals("cust-1", operations.lastCapturedRequest.getExpressionAttributeValues().get(":pk"));
-		assertNull(operations.lastCapturedScanRequest);
+			// Act
+			query.execute(new Object[] { PK_CUST_1 });
+
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertEquals(INDEX_NAME, operations.lastCapturedRequest.getIndexName()),
+					() -> assertEquals("pk = :pk", operations.lastCapturedRequest.getKeyConditionExpression()),
+					() -> assertEquals(PK_CUST_1,
+							operations.lastCapturedRequest.getExpressionAttributeValues().get(":pk")),
+					() -> assertNull(operations.lastCapturedScanRequest));
+		}
+
+		@Test
+		@DisplayName("positional placeholder binds by parameter index")
+		void positionalPlaceholderBindsByParameterIndex() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "rawByPositional", String.class);
+
+			// Act
+			query.execute(new Object[] { PK_CUST_9 });
+
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertEquals("pk = :0", operations.lastCapturedRequest.getKeyConditionExpression()),
+					() -> assertEquals(PK_CUST_9,
+							operations.lastCapturedRequest.getExpressionAttributeValues().get(":0")));
+		}
+
+		@Test
+		@DisplayName("named binding leaves the token verbatim in the expression")
+		void namedBindingLeavesTheTokenVerbatimInTheExpression() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "rawByPk", String.class);
+
+			// Act
+			query.execute(new Object[] { PK_CUST_2 });
+
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedRequest),
+					() -> assertFalse(operations.lastCapturedRequest.getKeyConditionExpression().contains("__spel_")),
+					() -> assertEquals(PK_CUST_2,
+							operations.lastCapturedRequest.getExpressionAttributeValues().get(":pk")));
+		}
 	}
 
-	@Test
-	void positionalPlaceholderBindsByParameterIndex() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "rawByPositional", String.class);
+	@Nested
+	@DisplayName("Scan path (filter expression only)")
+	class ScanPathTests {
 
-		query.execute(new Object[] { "cust-9" });
+		@Test
+		@DisplayName("filterExpression only produces a scan with a resolvable filter")
+		void filterExpressionOnlyProducesAScanWithAResolvableFilter() throws NoSuchMethodException {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			StringBasedDynamoDbQuery query = queryFor(operations, "scanByStatus", String.class);
 
-		assertNotNull(operations.lastCapturedRequest);
-		assertEquals("pk = :0", operations.lastCapturedRequest.getKeyConditionExpression());
-		assertEquals("cust-9", operations.lastCapturedRequest.getExpressionAttributeValues().get(":0"));
-	}
+			// Act
+			query.execute(new Object[] { ROUND_ACTIVE });
 
-	@Test
-	void filterExpressionOnlyProducesAScanWithAResolvableFilter() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "scanByStatus", String.class);
-
-		query.execute(new Object[] { "ACTIVE" });
-
-		assertNotNull(operations.lastCapturedScanRequest);
-		assertEquals("#s = :round", operations.lastCapturedScanRequest.getFilterExpression());
-		assertEquals("ACTIVE", operations.lastCapturedScanRequest.getExpressionAttributeValues().get(":round"));
-		assertNull(operations.lastCapturedRequest);
-	}
-
-	@Test
-	void namedBindingLeavesTheTokenVerbatimInTheExpression() throws NoSuchMethodException {
-		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-		StringBasedDynamoDbQuery query = queryFor(operations, "rawByPk", String.class);
-
-		query.execute(new Object[] { "cust-2" });
-
-		assertNotNull(operations.lastCapturedRequest);
-		assertFalse(operations.lastCapturedRequest.getKeyConditionExpression().contains("__spel_"));
-		assertEquals("cust-2", operations.lastCapturedRequest.getExpressionAttributeValues().get(":pk"));
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedScanRequest),
+					() -> assertEquals("#s = :round", operations.lastCapturedScanRequest.getFilterExpression()),
+					() -> assertEquals(ROUND_ACTIVE,
+							operations.lastCapturedScanRequest.getExpressionAttributeValues().get(":round")),
+					() -> assertNull(operations.lastCapturedRequest));
+		}
 	}
 }
