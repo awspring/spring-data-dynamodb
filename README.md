@@ -252,13 +252,12 @@ public interface MatchRepository extends DynamoDbRepository<Match, String> {
     List<Match> findInDateRange(@Param("pk") String pk,
                                 @Param("from") String from,
                                 @Param("to") String to);
-
-    @Query(filterExpression = "#region = :region",
-           indexName = "GSI1",
-           names = @ExpressionName(name = "#region", value = "region"))
-    List<Match> findByRegionOnIndex(@Param("region") String region);
 }
 ```
+
+To read a secondary index, prefer a typed `@SecondaryIndex` view (see below) queried through a
+`SecondaryIndexRepository`: a base-repository `@Query(indexName = …)` still returns the base entity
+type, so it only fits an index that projects everything that entity maps.
 
 PartiQL statements bind values positionally:
 

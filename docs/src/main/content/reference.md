@@ -838,16 +838,11 @@ public interface MatchRepository extends DynamoDbRepository<Match, String> {
     List<Match> findInDateRange(@Param("pk") String pk,
                                 @Param("from") String from,
                                 @Param("to") String to);
-
-    @Query(filterExpression = "#region = :region",
-           indexName = "GSI1",
-           names = @ExpressionName(name = "#region", value = "region"))
-    List<Match> findByRegionOnIndex(@Param("region") String region);
 }
 ```
 
-Parameters bind by name: the `:region` placeholder in the expression resolves to the argument
-annotated `@Param("region")` — declare the `@Param` name **without** the leading colon.
+Parameters bind by name: the `:from` placeholder in the expression resolves to the argument
+annotated `@Param("from")` — declare the `@Param` name **without** the leading colon.
 `@ExpressionName` maps a `#alias` to a real attribute name, which also sidesteps DynamoDB's reserved
 words (`region`, `year`, `status`, …). `@ExpressionValue` supplies a value inline, evaluated as a SpEL expression (a quoted literal such as `'ACTIVE'` is the common case).
 
@@ -855,6 +850,16 @@ words (`region`, `year`, `status`, …). `@ExpressionValue` supplies a value inl
 entirely, so `indexName` must always be set explicitly when you use it (the escape hatch does not
 auto-select an index), and correctness is yours. `AggregateRepository` `@Query` methods are exempt
 from this requirement.
+
+`@Query` accepts an `indexName`, but a repository is bound to its **entity**: a base-table
+repository like `MatchRepository` materializes every row back into `Match`, so pointing a `@Query` at
+a GSI only makes sense when that index projects exactly the attributes `Match` maps (in practice, a
+full projection). An index that is its own read model — renamed or partial fields, a different key
+shape — is not a `Match`; model it as a typed `@SecondaryIndex` view (section 3) and read it through
+a `SecondaryIndexRepository`. That is the type-safe, recommended way to query an index. If you do put
+`indexName` on a base-table `@Query`, two caveats apply: it needs a `keyConditionExpression` on the
+index's partition key (DynamoDB cannot `Query` by a non-key attribute), and a `@Query` with only a
+`filterExpression` silently runs as a base-table `Scan` with its `indexName` ignored.
 
 Other attributes: `consistentRead`, `limit`, `allowScan` (the `@Query`-side equivalent of
 `@AllowScan`), and `typeFilter`.
