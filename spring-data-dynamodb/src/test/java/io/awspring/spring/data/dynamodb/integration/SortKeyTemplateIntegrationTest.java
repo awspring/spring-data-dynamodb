@@ -122,7 +122,7 @@ public class SortKeyTemplateIntegrationTest extends LocalStackTestContainer {
 		List<Match> findByTournamentIdAndYearAndRound(String tournamentId, int year, String round);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = SortKeyTemplateIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!SortKeyTemplateIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = SortKeyTemplateIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!SortKeyTemplateIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

@@ -205,7 +205,7 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		Optional<OrderAggregate> loadWithPrefix(@Param("pk") String pk, @Param("prefix") String prefix);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = AggregateRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!AggregateRepositoryIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = AggregateRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!AggregateRepositoryIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

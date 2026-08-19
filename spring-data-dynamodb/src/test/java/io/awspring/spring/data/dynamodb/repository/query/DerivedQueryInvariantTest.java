@@ -150,7 +150,7 @@ class DerivedQueryInvariantTest {
 	class KeywordSweepTests {
 
 		@ParameterizedTest(name = "{0}")
-		@MethodSource("io.awspring.cloud.dynamodb.repository.query.DerivedQueryInvariantTest#allSupportedKeywords")
+		@MethodSource("io.awspring.spring.data.dynamodb.repository.query.DerivedQueryInvariantTest#allSupportedKeywords")
 		@DisplayName("every supported keyword produces a spec DynamoDB would accept")
 		void everySupportedKeywordProducesAnInternallyConsistentSpec(String methodName, Object[] arguments) {
 			// Act

@@ -121,7 +121,7 @@ public class PaginationIntegrationTest extends LocalStackTestContainer {
 		Window<PagedItem> findByPk(String pk, ScrollPosition position, Limit limit);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = PaginationIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!PaginationIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = PaginationIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!PaginationIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

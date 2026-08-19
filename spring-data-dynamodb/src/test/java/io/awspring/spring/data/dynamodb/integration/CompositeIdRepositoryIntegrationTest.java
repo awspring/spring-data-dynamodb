@@ -148,7 +148,7 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 	public interface CompositeEntityRepository extends DynamoDbRepository<CompositeEntity, DynamoDbCompositeId> {
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = CompositeIdRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!CompositeIdRepositoryIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = CompositeIdRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!CompositeIdRepositoryIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

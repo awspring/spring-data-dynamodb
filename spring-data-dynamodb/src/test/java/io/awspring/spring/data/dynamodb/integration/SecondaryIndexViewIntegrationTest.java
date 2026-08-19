@@ -274,7 +274,7 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 		List<MatchByRound> findByTournamentPkAndRound(String tournamentPk, String round);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = SecondaryIndexViewIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!SecondaryIndexViewIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = SecondaryIndexViewIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!SecondaryIndexViewIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

@@ -157,7 +157,7 @@ public class DerivedQueryBehaviourIntegrationTest extends LocalStackTestContaine
 		boolean existsBySensorAndMinuteGreaterThan(String sensor, Long minute);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = DerivedQueryBehaviourIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.cloud\\.dynamodb\\.integration\\.(?!DerivedQueryBehaviourIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = DerivedQueryBehaviourIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!DerivedQueryBehaviourIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;

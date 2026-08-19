@@ -314,8 +314,7 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 			@Nullable Object rangeEnd, FixedFragment fallback) {
 	}
 
-	@Nullable
-	private static DynamoDbQuerySpec.SortCondition.Op rangeOpFor(Part.Type type) {
+	private static DynamoDbQuerySpec.SortCondition.@Nullable Op rangeOpFor(Part.Type type) {
 		return switch (type) {
 		case GREATER_THAN, AFTER -> DynamoDbQuerySpec.SortCondition.Op.GT;
 		case GREATER_THAN_EQUAL -> DynamoDbQuerySpec.SortCondition.Op.GE;
