@@ -18,7 +18,7 @@ package io.awspring.spring.data.dynamodb.repository.query;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.core.DynamoDbOperations;
@@ -27,14 +27,15 @@ import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepositoryFactory;
-import io.awspring.spring.data.dynamodb.repository.Modifying;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Properties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.data.repository.Repository;
@@ -47,8 +48,8 @@ import org.springframework.data.repository.query.QueryLookupStrategy;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
-@DisplayName("D1 PartiQL / @Modifying interplay with eager scan check")
-class D1PartiQlModifyingInterplayTest {
+@DisplayName("D1 PartiQL / @Update interplay with eager scan check")
+class D1PartiQlUpdateInterplayTest {
 
 	private static final String TABLE_NAME = "orders";
 
@@ -64,8 +65,7 @@ class D1PartiQlModifyingInterplayTest {
 		@Query(partiQl = "SELECT * FROM orders WHERE tournamentId = ?")
 		List<Match> byTournament(@Param("tournamentId") String tournamentId);
 
-		@Modifying
-		@Query(updateExpression = "SET #s = :round")
+		@Update(updateExpression = "SET #s = :round")
 		Match updateStatus(@Param("tournamentId") String tournamentId, @Param("round") String round);
 
 		@Query(filterExpression = "#s = :round")
@@ -126,13 +126,13 @@ class D1PartiQlModifyingInterplayTest {
 		}
 
 		@Test
-		@DisplayName("@Modifying method is annotated query and takes the StringBased branch")
-		void modifyingMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
+		@DisplayName("@Update method is annotated query and takes the StringBased branch")
+		void updateMethodIsAnnotatedQueryAndSoTakesTheStringBasedBranch() throws NoSuchMethodException {
 			DynamoDbQueryMethod queryMethod = queryMethodFor("updateStatus", String.class, String.class);
 
-			assertAll(() -> assertTrue(queryMethod.isModifyingQuery(), "@Modifying method must classify as modifying"),
-					() -> assertTrue(queryMethod.hasAnnotatedQuery(),
-							"A @Modifying update carries @Query(updateExpression=...), so the factory routes it to StringBasedDynamoDbQuery"));
+			assertAll(() -> assertTrue(queryMethod.isUpdateQuery(), "@Update method must classify as an update"),
+					() -> assertFalse(queryMethod.hasAnnotatedQuery(),
+							"A standalone @Update method must not carry read-only @Query metadata"));
 		}
 	}
 
@@ -153,26 +153,22 @@ class D1PartiQlModifyingInterplayTest {
 		}
 
 		@Test
-		@DisplayName("@Modifying method dispatches to StringBased, never PartTree")
-		void factoryDispatchesModifyingMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
+		@DisplayName("@Update method dispatches to StringBased, never PartTree")
+		void factoryDispatchesUpdateMethodToStringBasedNeverPartTree() throws NoSuchMethodException {
 			RepositoryQuery query = resolveVia(newOperations(), "updateStatus", String.class, String.class);
 
 			assertAll(
 					() -> assertInstanceOf(StringBasedDynamoDbQuery.class, query,
-							"@Modifying update must be served by StringBasedDynamoDbQuery"),
+							"@Update update must be served by StringBasedDynamoDbQuery"),
 					() -> assertFalse(query instanceof PartTreeDynamoDbQuery,
-							"@Modifying update must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)"));
+							"@Update update must NEVER reach PartTreeDynamoDbQuery (the only class with the eager D1 check)"));
 		}
 
 		@Test
-		@DisplayName("StringBased construction does no eager scan check even for a scan-shaped query")
-		void stringBasedConstructionDoesNoEagerScanCheckEvenForAScanShapedQuery() throws NoSuchMethodException {
-			RepositoryQuery query = resolveVia(newOperations(), "scanByStatus", String.class);
-
-			assertAll(
-					() -> assertNotNull(query,
-							"StringBasedDynamoDbQuery constructs a scan-shaped @Query without any eager check"),
-					() -> assertInstanceOf(StringBasedDynamoDbQuery.class, query));
+		@DisplayName("scan-shaped @Query without opt-in is rejected during factory resolution")
+		void factoryRejectsScanShapedQueryWithoutOptIn() {
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> resolveVia(newOperations(), "scanByStatus", String.class));
 		}
 	}
 }

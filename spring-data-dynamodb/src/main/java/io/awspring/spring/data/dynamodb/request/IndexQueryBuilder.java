@@ -31,6 +31,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.data.mapping.MappingException;
 
 /**
+ * Builds a typed, key-schema-validated DynamoDB index query.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

@@ -18,17 +18,21 @@ package io.awspring.spring.data.dynamodb.core.mapping.events;
 import org.springframework.context.ApplicationEvent;
 
 /**
+ * Base application event carrying a mapped entity and physical table name.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 public class DynamoDbMappingEvent<T> extends ApplicationEvent {
 	private final String tableName;
 
+	/** Creates a mapping event. */
 	public DynamoDbMappingEvent(T source, String tableName) {
 		super(source);
 		this.tableName = tableName;
 	}
 
+	/** @return the physical table name */
 	public String getTableName() {
 		return tableName;
 	}

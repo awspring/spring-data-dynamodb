@@ -43,8 +43,6 @@ public class DynamoDbMappingContext
 
 	private final Map<String, Set<DynamoDbPersistentEntity<?>>> entitySetsByTableName = new ConcurrentHashMap<>();
 
-	private final Set<BasicDynamoDbPersistentEntity<?>> tableEntities = ConcurrentHashMap.newKeySet();
-
 	@Override
 	protected Optional<BasicDynamoDbPersistentEntity<?>> addPersistentEntity(TypeInformation<?> typeInformation) {
 
@@ -54,13 +52,11 @@ public class DynamoDbMappingContext
 
 		optional.ifPresent(entity -> {
 
-			if (!entity.isSecondaryIndexView() && !entity.isAggregateView()) {
+			if (!entity.isSecondaryIndexView() && !entity.isItemCollectionView()) {
 				Set<DynamoDbPersistentEntity<?>> entities = this.entitySetsByTableName
 						.computeIfAbsent(entity.getTableName(), string -> ConcurrentHashMap.newKeySet());
 				entities.add(entity);
 			}
-			this.tableEntities.add(entity);
-
 		});
 
 		return optional;
@@ -105,11 +101,6 @@ public class DynamoDbMappingContext
 
 	public Set<String> distinctBaseTableNames() {
 		return Collections.unmodifiableSet(new LinkedHashSet<>(this.entitySetsByTableName.keySet()));
-	}
-
-	public Collection<DynamoDbPersistentEntity<?>> getEntitiesForTable(String tableName) {
-		Set<DynamoDbPersistentEntity<?>> entities = this.entitySetsByTableName.get(tableName);
-		return entities == null ? Collections.emptySet() : Collections.unmodifiableCollection(entities);
 	}
 
 }

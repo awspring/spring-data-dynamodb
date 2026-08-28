@@ -21,6 +21,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.spring.data.dynamodb.core.mapping.IndexKeySchema;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,7 +43,8 @@ import org.springframework.util.StringUtils;
  */
 public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 
-	private final Query query;
+	private final @Nullable Query query;
+	private final @Nullable Update update;
 	private final ValueExpressionDelegate valueExpressionDelegate;
 	private final Class<?> domainClass;
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
@@ -54,9 +56,11 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 			ValueExpressionDelegate valueExpressionDelegate) {
 		super(queryMethod, operations);
 
-		Assert.isTrue(queryMethod.hasAnnotatedQuery(), "Query method must have an @Query annotation: " + queryMethod);
+		Assert.isTrue(queryMethod.hasAnnotatedQuery() || queryMethod.isUpdateQuery(),
+				"Query method must have an @Query or @Update annotation: " + queryMethod);
 
 		this.query = queryMethod.getQueryAnnotation();
+		this.update = queryMethod.getUpdateAnnotation();
 		this.valueExpressionDelegate = valueExpressionDelegate;
 		this.domainClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
 		this.mappingContext = operations.getConverter().getMappingContext();
@@ -69,7 +73,8 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 
 		Assert.hasText(namedQueryString, "Named query string must not be null or empty for method: " + queryMethod);
 
-		this.query = null;
+		this.query = queryMethod.getQueryAnnotation();
+		this.update = queryMethod.getUpdateAnnotation();
 		this.valueExpressionDelegate = valueExpressionDelegate;
 		this.domainClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
 		this.mappingContext = operations.getConverter().getMappingContext();
@@ -86,10 +91,12 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 
 		if (namedQueryString != null) {
 			var filter = bind(namedQueryString, accessor);
-			DynamoDbQuerySpec spec = DynamoDbQuerySpec.forScan();
+			DynamoDbQuerySpec spec = scanSpec();
 			spec.filterFragments().add(filter.expression());
 			spec.expressionAttributeNames().putAll(expressionNames());
 			spec.expressionAttributeValues().putAll(filter.values());
+			applyExpressionValues(spec.expressionAttributeValues(), accessor);
+			spec.consistentRead(query != null && query.consistentRead());
 			applyExplicitLimit(spec);
 			return spec;
 		}
@@ -111,7 +118,7 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 
 		if (StringUtils.hasText(query.filterExpression())) {
 			var filter = bind(query.filterExpression(), accessor);
-			DynamoDbQuerySpec spec = DynamoDbQuerySpec.forScan();
+			DynamoDbQuerySpec spec = scanSpec();
 			spec.filterFragments().add(filter.expression());
 			spec.expressionAttributeNames().putAll(expressionNames());
 			spec.expressionAttributeValues().putAll(filter.values());
@@ -122,35 +129,43 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		}
 
 		throw new InvalidDataAccessApiUsageException("@Query method has neither keyConditionExpression() nor "
-				+ "filterExpression() set -- nothing to execute (a PartiQL/@Modifying method takes a different "
+				+ "filterExpression() set -- nothing to execute (a PartiQL/@Update method takes a different "
 				+ "path). Method: " + getQueryMethod());
 	}
 
+	private DynamoDbQuerySpec scanSpec() {
+		DynamoDbQuerySpec spec = DynamoDbQuerySpec.forScan();
+		DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(domainClass);
+		if (entity.isSecondaryIndexView()) {
+			spec.scanIndexName(entity.getIndexName());
+		}
+		return spec;
+	}
+
 	@Override
-	protected ModifyingUpdate createUpdateRequest(ParameterAccessor accessor) {
+	protected UpdateExecution createUpdateRequest(ParameterAccessor accessor) {
 
-		Assert.isTrue(query != null && StringUtils.hasText(query.updateExpression()),
-				"@Modifying @Query requires updateExpression() to be set. Method: " + getQueryMethod());
+		Assert.state(update != null, "Update execution requires an @Update annotation: " + getQueryMethod());
 
-		var update = bind(query.updateExpression(), accessor);
-		Map<String, Object> values = new LinkedHashMap<>(update.values());
+		var boundUpdate = bind(update.updateExpression(), accessor);
+		Map<String, Object> values = new LinkedHashMap<>(boundUpdate.values());
 
 		String conditionExpression = null;
-		if (StringUtils.hasText(query.conditionExpression())) {
-			var condition = bind(query.conditionExpression(), accessor);
+		if (StringUtils.hasText(update.conditionExpression())) {
+			var condition = bind(update.conditionExpression(), accessor);
 			conditionExpression = condition.expression();
 			values.putAll(condition.values());
 		}
-		applyExpressionValues(values, accessor);
+		applyUpdateExpressionValues(values, accessor);
 
-		Map<String, String> names = expressionNames();
+		Map<String, String> names = QueryExpressions.expressionNames(update);
 		DynamoDbUpdateExpressionRequest request = DynamoDbUpdateExpressionRequest.Builder.builder()
-				.withUpdateExpression(update.expression()).withConditionExpression(conditionExpression)
+				.withUpdateExpression(boundUpdate.expression()).withConditionExpression(conditionExpression)
 				.withExpressionAttributeNames(names.isEmpty() ? null : names)
 				.withExpressionAttributeValues(values.isEmpty() ? null : values).build();
 
 		KeyValues key = resolveKeyValues(accessor);
-		return new ModifyingUpdate(key.partitionKey(), key.sortKey(), request);
+		return new UpdateExecution(key.partitionKey(), key.sortKey(), request);
 	}
 
 	@Override
@@ -196,6 +211,11 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 				accessor, values);
 	}
 
+	private void applyUpdateExpressionValues(Map<String, Object> values, ParameterAccessor accessor) {
+		QueryExpressions.applyExpressionValues(update, valueExpressionDelegate, getQueryMethod().getParameters(),
+				accessor, values);
+	}
+
 	private record KeyValues(Object partitionKey, @Nullable Object sortKey) {
 	}
 
@@ -207,7 +227,7 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		DynamoDbPersistentProperty sortKey = baseTable.singleSortKey();
 
 		Assert.state(partitionKey != null,
-				"Cannot resolve a base-table partition key for @Modifying update on " + domainClass.getName());
+				"Cannot resolve a base-table partition key for @Update update on " + domainClass.getName());
 
 		Map<String, Object> byName = new HashMap<>();
 		int bindableIndex = 0;
@@ -231,7 +251,7 @@ public class StringBasedDynamoDbQuery extends AbstractDynamoDbQuery {
 		if (columnName != null && byName.containsKey(columnName)) {
 			return byName.get(columnName);
 		}
-		throw new InvalidDataAccessApiUsageException("@Modifying @Query on " + getQueryMethod() + " needs a @Param "
+		throw new InvalidDataAccessApiUsageException("@Update on " + getQueryMethod() + " needs a @Param "
 				+ "parameter named '" + keyProperty.getName() + "'"
 				+ (columnName != null && !columnName.equals(keyProperty.getName()) ? " (or '" + columnName + "')" : "")
 				+ " supplying the " + role + " key value.");

@@ -17,11 +17,12 @@ package io.awspring.spring.data.dynamodb.repository.query;
 
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
-import io.awspring.spring.data.dynamodb.repository.AggregateRepository;
 import io.awspring.spring.data.dynamodb.repository.AllowScan;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
-import io.awspring.spring.data.dynamodb.repository.Modifying;
+import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import java.lang.reflect.Method;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -47,6 +48,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 	private final Method method;
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
 	private final @Nullable Query query;
+	private final @Nullable Update update;
 	private final boolean allowScan;
 
 	private @Nullable PartTree partTree;
@@ -60,6 +62,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		this.method = method;
 		this.mappingContext = mappingContext;
 		this.query = AnnotatedElementUtils.findMergedAnnotation(method, Query.class);
+		this.update = AnnotatedElementUtils.findMergedAnnotation(method, Update.class);
 		this.allowScan = AnnotatedElementUtils.hasAnnotation(method, AllowScan.class)
 				|| (this.query != null && this.query.allowScan());
 
@@ -83,12 +86,29 @@ public class DynamoDbQueryMethod extends QueryMethod {
 							+ "(keyset-based, see ScrollPosition/KeysetScrollPosition) instead. Method: " + method);
 		}
 
-		if (AggregateRepository.class.isAssignableFrom(metadata.getRepositoryInterface())
-				&& AnnotatedElementUtils.hasAnnotation(method, Modifying.class)) {
+		boolean itemCollectionRepository = ItemCollectionRepository.class
+				.isAssignableFrom(metadata.getRepositoryInterface());
+		boolean secondaryIndexRepository = SecondaryIndexRepository.class
+				.isAssignableFrom(metadata.getRepositoryInterface());
+
+		if (query != null && update != null) {
 			throw new InvalidDataAccessApiUsageException(
-					"@Modifying is not supported on an AggregateRepository: an @AggregateTable is a read-only "
-							+ "projection and never writes the underlying @Table entities. Remove @Modifying, or move "
+					"@Query and @Update are mutually exclusive: @Query reads data, while @Update performs a "
+							+ "single-item UpdateItem. Method: " + method);
+		}
+
+		if (itemCollectionRepository && update != null) {
+			throw new InvalidDataAccessApiUsageException(
+					"@Update is not supported on an ItemCollectionRepository: an @ItemCollectionView is a read-only "
+							+ "projection and never writes the underlying @Table entities. Remove @Update, or move "
 							+ "the write to a DynamoDbRepository / DynamoDbOperations. Method: " + method);
+		}
+
+		if (secondaryIndexRepository && update != null) {
+			throw new InvalidDataAccessApiUsageException(
+					"@Update is not supported on a SecondaryIndexRepository: a @SecondaryIndex view is read-only. "
+							+ "Remove @Update, or move the write to a DynamoDbRepository / DynamoDbOperations. Method: "
+							+ method);
 		}
 
 		if (query != null && StringUtils.hasText(query.indexName())
@@ -100,9 +120,33 @@ public class DynamoDbQueryMethod extends QueryMethod {
 							+ "query it through a SecondaryIndexRepository instead. Method: " + method);
 		}
 
+		if (query != null && itemCollectionRepository && StringUtils.hasText(query.partiQl())) {
+			throw new InvalidDataAccessApiUsageException(
+					"@Query(partiQl=...) is not supported on an ItemCollectionRepository: item-collection reads "
+							+ "require keyConditionExpression() so rows can be folded by partition. Method: " + method);
+		}
+
+		if (query != null && query.consistentRead()) {
+			String indexName = query.indexName();
+			if (!StringUtils.hasText(indexName)) {
+				DynamoDbPersistentEntity<?> entity = this.mappingContext.getRequiredPersistentEntity(getDomainClass());
+				if (itemCollectionRepository) {
+					indexName = entity.getItemCollectionIndexName();
+				}
+				else if (entity.isSecondaryIndexView()) {
+					indexName = entity.getIndexName();
+				}
+			}
+			if (StringUtils.hasText(indexName)) {
+				throw new InvalidDataAccessApiUsageException(
+						"@Query cannot combine consistentRead=true with indexName='" + indexName
+								+ "': DynamoDB global secondary indexes support only eventually consistent reads. Method: "
+								+ method);
+			}
+		}
+
 		if (query != null && StringUtils.hasText(query.keyConditionExpression())) {
-			boolean isAggregateRepo = AggregateRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
-			if (!isAggregateRepo && !StringUtils.hasText(query.indexName())) {
+			if (!itemCollectionRepository && !StringUtils.hasText(query.indexName())) {
 				throw new InvalidDataAccessApiUsageException(
 						"@Query(keyConditionExpression=...) requires indexName() to be set explicitly -- "
 								+ "there is no DynamoDbQuerySpec to auto-select an index from on this escape hatch. "
@@ -114,20 +158,14 @@ public class DynamoDbQueryMethod extends QueryMethod {
 			}
 		}
 
-		if (query != null && StringUtils.hasText(query.updateExpression())
-				&& !AnnotatedElementUtils.hasAnnotation(method, Modifying.class)) {
-			throw new InvalidDataAccessApiUsageException(
-					"@Query(updateExpression=...) requires @Modifying. Method: " + method);
-		}
-
 		if (query != null && query.limit() == 0) {
 			throw new InvalidDataAccessApiUsageException(
 					"@Query(limit = 0) is not a valid DynamoDB Limit -- Limit must be at least 1. Leave limit() unset "
 							+ "(the default of -1) to page without an explicit limit. Method: " + method);
 		}
 
-		if (isModifyingQuery()) {
-			verifyModifyingReturnType(method);
+		if (isUpdateQuery()) {
+			verifyUpdateReturnType(method);
 		}
 
 		PartTree tree = partTree();
@@ -137,7 +175,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 					+ "Top/First keyword or the Limit parameter, not both. Method: " + method);
 		}
 
-		if (!isCountQuery() && !isExistsQuery() && !isModifyingQuery()
+		if (!isCountQuery() && !isExistsQuery() && !isUpdateQuery()
 				&& getResultProcessor().getReturnedType().isProjecting()) {
 			throw new InvalidDataAccessApiUsageException(
 					"DTO / interface projections are not supported in this alpha. Declare the query method to return "
@@ -146,7 +184,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		}
 	}
 
-	private void verifyModifyingReturnType(Method method) {
+	private void verifyUpdateReturnType(Method method) {
 
 		Class<?> returnType = method.getReturnType();
 		if (void.class.equals(returnType) || Void.class.equals(returnType) || boolean.class.equals(returnType)
@@ -160,7 +198,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 			return;
 		}
 
-		throw new InvalidDataAccessApiUsageException("@Modifying query method returns " + returnType.getName()
+		throw new InvalidDataAccessApiUsageException("@Update query method returns " + returnType.getName()
 				+ ", which a single UpdateItem cannot produce. Declare void, boolean, int/long (affected items) or "
 				+ domainType.getSimpleName() + " (the updated entity). Method: " + method);
 	}
@@ -179,12 +217,17 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		return this.query;
 	}
 
+	@Nullable
+	public Update getUpdateAnnotation() {
+		return this.update;
+	}
+
 	public boolean allowsScan() {
 		return this.allowScan;
 	}
 
-	public boolean isModifyingQuery() {
-		return AnnotatedElementUtils.hasAnnotation(this.method, Modifying.class);
+	public boolean isUpdateQuery() {
+		return this.update != null;
 	}
 
 	public boolean isCountQuery() {
@@ -220,7 +263,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 	@Nullable
 	private PartTree partTree() {
 
-		if (this.query != null) {
+		if (this.query != null || this.update != null) {
 			return null;
 		}
 		if (this.partTree == null) {
@@ -241,10 +284,6 @@ public class DynamoDbQueryMethod extends QueryMethod {
 
 	public Class<?> getDeclaredReturnType() {
 		return this.method.getReturnType();
-	}
-
-	public boolean wantsTypeFilter() {
-		return this.query == null || this.query.typeFilter();
 	}
 
 	protected MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> getMappingContext() {

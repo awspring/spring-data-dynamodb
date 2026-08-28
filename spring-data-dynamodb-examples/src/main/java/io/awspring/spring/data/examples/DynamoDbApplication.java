@@ -24,7 +24,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @since 1.0.0
  */
 @SpringBootApplication
-@EnableDynamoDbRepositories
+@EnableDynamoDbRepositories(namedQueriesLocation = "classpath:dynamodb-named-queries.properties")
 public class DynamoDbApplication {
 
 	public static void main(String[] args) {

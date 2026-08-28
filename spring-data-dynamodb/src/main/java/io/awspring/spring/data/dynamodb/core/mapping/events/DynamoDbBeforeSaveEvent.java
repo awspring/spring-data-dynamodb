@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core.mapping.events;
 
 /**
+ * Published before a save entity is converted and written.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

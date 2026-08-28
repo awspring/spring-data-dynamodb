@@ -15,24 +15,24 @@
  */
 package io.awspring.spring.data.examples.model;
 
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import java.util.List;
 
 /**
  * @author Matej Nedic
  * @since 1.0.0
  */
-@AggregateTable(tableName = "Commerce", partitionKey = "pk", sortKey = "sk")
-public class AggregateOrder {
+@ItemCollectionView(tableName = "Commerce", partitionKey = "pk", sortKey = "sk")
+public class OrderItemCollection {
 
-	@AggregateItem(regex = "^#PROFILE$")
+	@ItemCollectionMember(regex = "^#PROFILE$")
 	private Customer customer;
 
-	@AggregateItem(regex = "^ORDER#[^#]+$")
+	@ItemCollectionMember(regex = "^ORDER#[^#]+$")
 	private Order order;
 
-	@AggregateItem(regex = "^ORDER#[^#]+#ITEM#.+$")
+	@ItemCollectionMember(regex = "^ORDER#[^#]+#ITEM#.+$")
 	private List<OrderItem> orderItemList;
 
 	public Customer getCustomer() {

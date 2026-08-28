@@ -17,6 +17,7 @@ package io.awspring.spring.data.dynamodb.core.converter;
 
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
+import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.convert.CustomConversions;
@@ -51,5 +52,5 @@ public interface DynamoDbConverter extends
 	void update(Object objectToUpdate, Map<String, AttributeValue> keys, DynamoDbPersistentEntity<?> entity,
 			Map<String, AttributeValueUpdate> values);
 
-	void stampDiscriminator(Map<String, AttributeValue> sink, DynamoDbPersistentEntity<?> entity);
+	<A> A readItemCollection(List<Map<String, AttributeValue>> items, DynamoDbPersistentEntity<A> viewEntity);
 }

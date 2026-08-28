@@ -109,7 +109,7 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 
 		this.verifier.verify(this);
 
-		if (this.tableName == null && !isSecondaryIndexView() && !isAggregateView()) {
+		if (this.tableName == null && !isSecondaryIndexView() && !isItemCollectionView()) {
 			setTableName(determineTableName());
 		}
 	}
@@ -124,8 +124,8 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 			return this.tableName;
 		}
 		String resolved;
-		if (isAggregateView()) {
-			resolved = requireAggregateTable().tableName();
+		if (isItemCollectionView()) {
+			resolved = requireItemCollectionView().tableName();
 		}
 		else {
 			resolved = isSecondaryIndexView() ? resolveViewTableName() : determineTableName();
@@ -135,27 +135,27 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 	}
 
 	@Override
-	public boolean isAggregateView() {
-		return findAnnotation(AggregateTable.class) != null;
+	public boolean isItemCollectionView() {
+		return findAnnotation(ItemCollectionView.class) != null;
 	}
 
 	@Override
 	@Nullable
-	public String getAggregatePartitionKeyColumn() {
-		AggregateTable annotation = findAnnotation(AggregateTable.class);
+	public String getItemCollectionPartitionKeyColumn() {
+		ItemCollectionView annotation = findAnnotation(ItemCollectionView.class);
 		return annotation != null ? annotation.partitionKey() : null;
 	}
 
 	@Override
 	@Nullable
-	public String getAggregateSortKeyColumn() {
-		AggregateTable annotation = findAnnotation(AggregateTable.class);
+	public String getItemCollectionSortKeyColumn() {
+		ItemCollectionView annotation = findAnnotation(ItemCollectionView.class);
 		return annotation != null ? annotation.sortKey() : null;
 	}
 
-	private AggregateTable requireAggregateTable() {
-		AggregateTable annotation = findAnnotation(AggregateTable.class);
-		Assert.state(annotation != null, () -> getType().getName() + " is not an @AggregateTable class");
+	private ItemCollectionView requireItemCollectionView() {
+		ItemCollectionView annotation = findAnnotation(ItemCollectionView.class);
+		Assert.state(annotation != null, () -> getType().getName() + " is not an @ItemCollectionView class");
 		return annotation;
 	}
 
@@ -193,21 +193,6 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 	}
 
 	@Override
-	public String getTypeName() {
-		Table annotation = findAnnotation(Table.class);
-		if (annotation != null && StringUtils.hasText(annotation.typeName())) {
-			return annotation.typeName();
-		}
-		return getType().getSimpleName();
-	}
-
-	@Override
-	public String getDiscriminatorColumn() {
-		Table annotation = findAnnotation(Table.class);
-		return annotation != null ? annotation.discriminator() : "";
-	}
-
-	@Override
 	public boolean isSecondaryIndexView() {
 		return findAnnotation(SecondaryIndex.class) != null;
 	}
@@ -224,11 +209,11 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 
 	@Override
 	@Nullable
-	public String getAggregateIndexName() {
-		AggregateTable annotation = findAnnotation(AggregateTable.class);
+	public String getItemCollectionIndexName() {
+		ItemCollectionView annotation = findAnnotation(ItemCollectionView.class);
 		if (annotation == null) {
 			return null;
 		}
-		return annotation.indexName();
+		return StringUtils.hasText(annotation.indexName()) ? annotation.indexName() : null;
 	}
 }

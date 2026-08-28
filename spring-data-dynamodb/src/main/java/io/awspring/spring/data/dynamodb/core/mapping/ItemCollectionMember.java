@@ -13,16 +13,44 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.spring.data.dynamodb.repository;
+package io.awspring.spring.data.dynamodb.core.mapping;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.METHOD)
+/**
+ * Routes matching items onto a field of an {@link ItemCollectionView}.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
-public @interface Modifying {
+@Inherited
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
+public @interface ItemCollectionMember {
+
+	/**
+	 * @return the required sort-key prefix
+	 */
+	String startsWith() default "";
+
+	/**
+	 * @return the required sort-key suffix
+	 */
+	String endsWith() default "";
+
+	/**
+	 * @return the regular expression matched against the complete sort key
+	 */
+	String regex() default "";
+
+	/**
+	 * @return the sort-key attribute to match, or empty to use the view sort key
+	 */
+	String sortKey() default "";
 }

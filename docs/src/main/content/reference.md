@@ -22,11 +22,10 @@ Every example in this guide builds one running domain: an **esports tournament a
    2.3. `@Version`
    2.4. `@InnerClass`
    2.5. `@SortKeyTemplate`
-   2.6. `@Table(discriminator = …)`
-   2.7. `@AggregateTable`
+   2.6. `@ItemCollectionView`
 3. Secondary index views
    3.1. A typed view
-   3.2. A polymorphic container view
+   3.2. A heterogeneous container view
    3.3. Multi-attribute index keys
    3.4. Local secondary indexes
    3.5. Views are read-only
@@ -38,16 +37,15 @@ Every example in this guide builds one running domain: an **esports tournament a
    4.5. `@AllowScan`
    4.6. Limiting queries: `findFirst` / `findTop`
    4.7. Pagination
-   4.8. `AggregateRepository`
+   4.8. `ItemCollectionRepository`
 5. `@Query` — explicit expressions
    5.1. Key conditions and filters
-   5.2. `@Modifying` — single-item updates
+   5.2. `@Update` — single-item updates
    5.3. PartiQL
 6. `DynamoDbOperations` — the template API
    6.1. Writes
    6.2. Reads
    6.3. `IndexQueryBuilder`
-   6.4. Class-less polymorphic reads
 7. Lifecycle callbacks and events
 8. Custom conversions
 9. Exception translation
@@ -119,6 +117,16 @@ The base class contributes the rest as overridable `@Bean` methods:
 
 By default entities are discovered by scanning the configuration class's own package. Override
 `getEntityBasePackages()` to change that.
+
+`@EnableDynamoDbRepositories` also exposes the main Spring Data repository controls:
+
+| Attribute | Purpose |
+|---|---|
+| `namedQueriesLocation` | Classpath location of a named-query properties file (section 5.4). |
+| `dynamoDbOperationsRef` | Bean name of the `DynamoDbOperations` instance repositories should use; useful when several templates exist. |
+| `considerNestedRepositories` | Whether nested repository interfaces are included during scanning. |
+| `queryLookupStrategy` | `CREATE` derives only, `USE_DECLARED_QUERY` requires a named or `@Query` declaration, and `CREATE_IF_NOT_FOUND` tries declarations before derivation. |
+| `bootstrapMode` | Controls when repository beans are initialized (`DEFAULT`, `DEFERRED`, or `LAZY`). |
 
 ### 1.3. Creating the table
 
@@ -286,8 +294,7 @@ another's. With `ORDER#9876` for an order and `ORDER#9876#LINE#abc` for its line
 ```
 
 Ambiguity is never checked, whichever marker you use: if two members can match the same sort key,
-both are populated. Keep the routes mutually exclusive, or dispatch on an explicit discriminator
-attribute instead — see `@Table(discriminator = ...)` and `queryPolymorphic`.
+both are populated. Keep the routes mutually exclusive.
 
 ### 2.5. `@SortKeyTemplate` — composed sort keys
 
@@ -363,91 +370,56 @@ Two templates targeting the same column, or a template on a column that also has
 so it is unambiguous only if a placeholder value never contains the next literal. True for ids,
 enums and dates; not guaranteed for free text.
 
-### 2.6. `@Table(discriminator = …)` — an explicit type attribute
+### 2.6. `@ItemCollectionView` — read-only item-collection views
 
-Type is normally already encoded in the key (`MATCH#…`), which is what `@InnerClass` prefix routing
-reads — so no extra attribute is written by default and your items carry no surprise columns.
-
-Opt in only when a type genuinely *cannot* be derived from any key, for example two item kinds with
-an identical key shape that differ only in payload:
-
-```java
-@Table(tableName = "tournament_arena", discriminator = "_type", typeName = "MATCH")
-public class Match { … }
-
-@Table(tableName = "tournament_arena", discriminator = "_type", typeName = "PLAYER")
-public class Player { … }
-```
-
-The module then writes `_type = "MATCH"` on save, and the class-less reads
-(`queryPolymorphic`/`scanPolymorphic`) use it to resolve each item's concrete type. `typeName`
-defaults to the simple class name.
-
-All entities sharing a table must agree on the same discriminator column. A class-less read against
-a table where **no** entity opted in fails fast with a clear message — use a typed read
-(`query(Class, …)`) or a `@SecondaryIndex` view instead.
-
----
-
-
-### 2.7. `@AggregateTable` — read-only aggregation
-
-`@AggregateTable` provides a simpler way to model **Single Table Design for read queries**. It is
+`@ItemCollectionView` provides a simpler way to model **Single Table Design for read queries**. It is
 designed specifically for **read-only aggregation**: instead of returning one object for every item
 and requiring callers to inspect which fields are populated, the annotation groups related entities
-from the same partition into a single aggregate object.
+from the same partition into one typed item-collection view.
 
-`@AggregateItem` identifies which `@Table` entity should be mapped to each field. Routing is
+`@ItemCollectionMember` identifies which projection row type should be mapped to each field. Routing is
 based on the entity's sort key and can use `startsWith`, `endsWith`, or `regex`:
 
 ```java
-@AggregateTable(
+@ItemCollectionView(
         tableName = "single_table_demo",
         partitionKey = "pk",
         sortKey = "sk"
 )
 public class CustomerRow {
 
-    @AggregateItem(regex = "ORDER#[^#]+")
+    @ItemCollectionMember(regex = "ORDER#[^#]+")
     private OrderData order;
 
-    @AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+")
+    @ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+")
     private List<OrderLineData> line;
 }
 ```
 
-The classes referenced by `@AggregateItem` must be annotated with `@Table`:
+The classes referenced by `@ItemCollectionMember` are projection row types and do not need
+`@Table`. The enclosing `@ItemCollectionView` supplies the physical table and index metadata. Normal
+property mapping annotations such as `@Column` and `@InnerClass` remain available when needed:
 
 ```java
-@Table(tableName = "single_table_demo")
 public class OrderData {
 
-    @PartitionKey
     private String pk;
-
-    @SortKey
     private String sk;
-
     private String customerId;
 }
 ```
 
 ```java
-@Table(tableName = "single_table_demo")
 public class OrderLineData {
 
-    @PartitionKey
     private String pk;
-
-    @SortKey
     private String sk;
-
     private String productId;
 }
 ```
 
-When the aggregate is queried, the module reads the matching rows and maps each row to the
-appropriate `@AggregateItem` field based on its sort-key pattern. This allows a query to return
+When the view is queried, the module reads the matching rows and maps each row to the
+appropriate `@ItemCollectionMember` field based on its sort-key pattern. This allows a query to return
 a single grouped representation instead of requiring application code to iterate over every result
 and check which field is populated.
 
@@ -459,7 +431,7 @@ For example, given the following rows:
 | `CUSTOMER#123` | `ORDER#9876#LINE#1` |
 | `CUSTOMER#123` | `ORDER#9876#LINE#2` |
 
-the rows can be grouped into a single aggregate:
+the rows can be grouped into a single item-collection view:
 
 ```java
 CustomerRow customer = ...;
@@ -468,32 +440,35 @@ CustomerRow customer = ...;
         customer.getLine();  // List<OrderLineData>
 ```
 
-Unlike `@InnerClass`, `@AggregateTable` is **read-only and intended for grouping query results**.
-It does not embed or flatten the child entities into the aggregate item, and it does not change how
-the child entities are persisted. The child types remain independently mapped `@Table` entities.
+Unlike `@InnerClass`, `@ItemCollectionView` is **read-only and intended for grouping query results**.
+It does not embed or flatten the child entities into one DynamoDB item, and it does not change how
+the child entities are persisted. A child type may also be an independently writable `@Table` entity,
+but item-collection materialization does not require it.
 
 The routing rules follow the same matching semantics as `@InnerClass`:
 
 - **`startsWith`** matches when the sort key starts with the specified prefix.
 - **`endsWith`** matches when the sort key ends with the specified suffix.
 - **`regex`** must match the entire sort-key value.
-- **`sortKey`** matches the SortKey column name when using `regex`, `startsWith` or `endsWith`. Used when multiple SortKeys exist in GlobalSecondaryIndex and Query contains multiple SortKeys.
+- **`sortKey`** selects the physical sort-key attribute whose value is tested by `startsWith`,
+  `endsWith`, or `regex`. Set it when an index-backed view has more than one candidate sort-key
+  attribute; otherwise the view's declared `sortKey` is used.
 - **Multiple conditions** can be combined, in which case all conditions must match.
 
 As with `@InnerClass`, use `regex` when hierarchical sort keys would otherwise cause overlapping
 prefix matches. For example, `startsWith = "ORDER#"` would match both `ORDER#9876` and
 `ORDER#9876#LINE#1`, while `regex = "ORDER#[^#]+"` matches only the order row.
 
-Unlike `@InnerClass` (whose pattern is compiled and validated at bootstrap), an `@AggregateItem`
-regex is compiled on the first aggregate query, so an invalid pattern surfaces then rather than at
+Unlike `@InnerClass` (whose pattern is compiled and validated at bootstrap), an `@ItemCollectionMember`
+regex is compiled on the first item-collection query, so an invalid pattern surfaces then rather than at
 application startup.
 
-`@AggregateTable` is useful when the primary goal is to **query a single-table design and group its
+`@ItemCollectionView` is useful when the primary goal is to **query a single-table design and group its
 heterogeneous rows into a convenient read model**, while keeping the underlying `@Table` entities
 independent and suitable for normal persistence.
 
-An aggregate is read through an `AggregateRepository<A>` (see section 4.8), or through the template's
-`queryAggregate(...)` when you need a hand-written key condition:
+An item-collection view is read through an `ItemCollectionRepository<A>` (see section 4.8), or through the template's
+`queryItemCollection(...)` when you need a hand-written key condition:
 
 ```java
 DynamoDbQueryRequest request = DynamoDbQueryRequest.Builder.request()
@@ -503,11 +478,14 @@ DynamoDbQueryRequest request = DynamoDbQueryRequest.Builder.request()
         .build();
 
 EntityQueryResult<CustomerRow> result =
-        operations.queryAggregate(CustomerRow.class, request, DynamoDbPageRequest.of(100));
+        operations.queryItemCollection(CustomerRow.class, request, DynamoDbPageRequest.of(100));
 ```
 
-`queryAggregate` pages through the entire matched partition (following `LastEvaluatedKey`) before
-folding the rows, so the aggregate is complete regardless of DynamoDB's 1 MB page limit.
+`queryItemCollection` pages through the entire matched partition (following `LastEvaluatedKey`) before
+folding the rows, so the view is complete regardless of DynamoDB's 1 MB page limit. A supplied
+`DynamoDbPageRequest` controls the initial cursor and the `Limit` sent with **each** DynamoDB request;
+that limit is a per-request evaluated-item page size, not a cap on the total folded result. The
+operation continues from every returned cursor until DynamoDB reports no next page.
 
 
 ## 3. Secondary index views: `@SecondaryIndex`
@@ -539,7 +517,7 @@ in a multi-table application.
 A view's `@PartitionKey`/`@SortKey` are the **index's** keys, and every read the module issues for a
 view automatically sets `IndexName` and the resolved `TableName` — callers never pass an index name.
 
-### 3.2. A polymorphic container view
+### 3.2. A heterogeneous container view
 
 Views support the same `@InnerClass` prefix routing the base table uses, so one query can
 reconstruct heterogeneous rows from an overloaded index:
@@ -744,6 +722,11 @@ List<Match> findTop3ByPkOrderBySkDesc(String pk);   // Limit 3
 A single-entity limiting method (`findFirstBy…` returning `Match`) returns the first result and does
 **not** throw when several rows match — the limit truncates the result set at the source.
 
+A derived `OrderBy` may reference only the selected index's sort key. Ascending order maps to
+DynamoDB's `ScanIndexForward=true`; descending order maps to `ScanIndexForward=false`. Ordering by a
+non-sort-key attribute is rejected when the repository method is bootstrapped rather than being
+emulated with an in-memory sort.
+
 ### 4.7. Pagination
 
 DynamoDB pages by an opaque `LastEvaluatedKey`, not a numeric offset, so `Window<T>` is the
@@ -774,18 +757,18 @@ item, so a position is only available for the final element: call
 returning the page-end cursor, which would silently skip the rows in between. Use
 `window.hasPosition(index)` if you want to probe without catching.
 
-### 4.8. `AggregateRepository`
+### 4.8. `ItemCollectionRepository`
 
-An `@AggregateTable` (section 2.7) is read through an `AggregateRepository<A>`, the read-only
+An `@ItemCollectionView` (section 2.6) is read through an `ItemCollectionRepository<V>`, the read-only
 counterpart to `SecondaryIndexRepository`:
 
 ```java
-public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+public interface CustomerItemCollectionRepository extends ItemCollectionRepository<CustomerRow> {
 }
 ```
 
 It contributes a fixed set of partition-oriented finders — there are no derived query methods, since
-an aggregate always folds one partition (or one index collection) into a single object:
+an item-collection view always folds one partition (or one index collection) into a single object:
 
 ```java
 Optional<CustomerRow> whole    = repository.findByPartitionKey("CUSTOMER#123");
@@ -797,15 +780,18 @@ Optional<CustomerRow> prefixed = repository.findByPartitionKeyAndSortKeyStarting
 boolean populated              = repository.existsByPartitionKey("CUSTOMER#123");
 ```
 
-Each finder issues one `Query`, pages through the whole result following `LastEvaluatedKey`, and
-folds the rows onto the aggregate's `@AggregateItem` fields. `findByPartitionKeyAndSortKey` narrows
-to a single item, `…StartingWith` to a `begins_with` prefix, and `…Between` to a sort-key range.
+The `Optional`-returning finders issue a `Query`, page through the whole result following
+`LastEvaluatedKey`, and fold the rows onto the view's `@ItemCollectionMember` fields.
+`findByPartitionKeyAndSortKey` narrows to a single item, `…StartingWith` to a `begins_with` prefix,
+and `…Between` to a sort-key range. `existsByPartitionKey` instead uses `Select=COUNT` with a
+per-request limit of one and stops at the first matching item; if a filter removes an evaluated item,
+it follows the cursor until a match is counted or DynamoDB reports no next page.
 
 For a key condition the fixed finders cannot express, add a `@Query` method whose expression is
-passed straight through to `queryAggregate`:
+passed straight through to `queryItemCollection`:
 
 ```java
-public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+public interface CustomerItemCollectionRepository extends ItemCollectionRepository<CustomerRow> {
 
     @Query(keyConditionExpression = "#pk = :pk AND begins_with(#sk, :prefix)",
            names = { @ExpressionName(name = "#pk", value = "pk"),
@@ -814,10 +800,10 @@ public interface CustomerAggregateRepository extends AggregateRepository<Custome
 }
 ```
 
-Derived query methods and `@Modifying` methods are both rejected at bootstrap on an
-`AggregateRepository` — only the fixed finders and read-only `@Query` methods are allowed, because an
-aggregate is a read-only projection and `@AggregateTable` never changes how the underlying `@Table`
-entities are written. When the aggregate is index-backed (`@AggregateTable(indexName = "GSI2", …)`),
+Derived query methods and `@Update` methods are both rejected at bootstrap on an
+`ItemCollectionRepository` — only the fixed finders and read-only `@Query` methods are allowed, because an
+item-collection view is read-only and `@ItemCollectionView` never changes how the underlying `@Table`
+entities are written. When the view is index-backed (`@ItemCollectionView(indexName = "GSI2", …)`),
 the same finders run against that index, and `partitionKey`/`sortKey` name the index's key
 attributes.
 
@@ -830,14 +816,22 @@ When derivation cannot express a query, write the DynamoDB expression yourself.
 ### 5.1. Key conditions and filters
 
 ```java
-public interface MatchRepository extends DynamoDbRepository<Match, String> {
+@SecondaryIndex(name = "GSI1", tableName = "tournament_arena")
+public class MatchByDate {
+
+    @PartitionKey @Column("gsi1pk") private String tournament;
+    @SortKey      @Column("gsi1sk") private String matchDate;
+}
+
+public interface MatchByDateRepository extends SecondaryIndexRepository<MatchByDate> {
 
     @Query(keyConditionExpression = "#pk = :pk AND #sk BETWEEN :from AND :to",
-           names = { @ExpressionName(name = "#pk", value = "pk"),
-                     @ExpressionName(name = "#sk", value = "sk") })
-    List<Match> findInDateRange(@Param("pk") String pk,
-                                @Param("from") String from,
-                                @Param("to") String to);
+           indexName = "GSI1",
+           names = { @ExpressionName(name = "#pk", value = "gsi1pk"),
+                     @ExpressionName(name = "#sk", value = "gsi1sk") })
+    List<MatchByDate> findInDateRange(@Param("pk") String pk,
+                                      @Param("from") String from,
+                                      @Param("to") String to);
 }
 ```
 
@@ -848,27 +842,27 @@ words (`region`, `year`, `status`, …). `@ExpressionValue` supplies a value inl
 
 `keyConditionExpression` is an escape hatch: it bypasses the module's key-condition validation
 entirely, so `indexName` must always be set explicitly when you use it (the escape hatch does not
-auto-select an index), and correctness is yours. `AggregateRepository` `@Query` methods are exempt
+auto-select an index), and correctness is yours. `ItemCollectionRepository` `@Query` methods are exempt
 from this requirement.
 
-`@Query` accepts an `indexName`, but a repository is bound to its **entity**: a base-table
-repository like `MatchRepository` materializes every row back into `Match`, so pointing a `@Query` at
-a GSI only makes sense when that index projects exactly the attributes `Match` maps (in practice, a
-full projection). An index that is its own read model — renamed or partial fields, a different key
-shape — is not a `Match`; model it as a typed `@SecondaryIndex` view (section 3) and read it through
-a `SecondaryIndexRepository`. That is the type-safe, recommended way to query an index. If you do put
-`indexName` on a base-table `@Query`, two caveats apply: it needs a `keyConditionExpression` on the
-index's partition key (DynamoDB cannot `Query` by a non-key attribute), and a `@Query` with only a
-`filterExpression` silently runs as a base-table `Scan` with its `indexName` ignored.
+A base-table `DynamoDbRepository` rejects `@Query(indexName=...)`; use a derived method for base-table
+key queries. For an explicit key condition on a typed `SecondaryIndexRepository`, the caller is
+responsible for naming the same physical index represented by its `@SecondaryIndex` view. Filter-only
+queries on a typed view do not need `indexName`: they scan the index declared by the view and still
+require `@AllowScan` or `allowScan = true`.
 
-Other attributes: `consistentRead`, `limit`, `allowScan` (the `@Query`-side equivalent of
-`@AllowScan`), and `typeFilter`.
+Other attributes: `consistentRead`, `limit`, and `allowScan` (the `@Query`-side equivalent of
+`@AllowScan`). Declared filter-only queries and normal named queries without scan opt-in are rejected
+when the repository is created, matching the fail-fast behavior of derived scan queries.
 
-### 5.2. `@Modifying` — single-item updates
+For non-PartiQL read queries, a `long`/`Long` return type executes a DynamoDB count and a
+`boolean`/`Boolean` return type executes an existence check. Other supported return types materialize
+entities normally.
+
+### 5.2. `@Update` — single-item updates
 
 ```java
-@Modifying
-@Query(updateExpression = "SET #winner = :winner",
+@Update(updateExpression = "SET #winner = :winner",
        conditionExpression = "attribute_exists(#pk)",
        names = { @ExpressionName(name = "#winner", value = "winner"),
                  @ExpressionName(name = "#pk", value = "pk") })
@@ -876,9 +870,13 @@ void recordWinner(@Param("pk") String pk, @Param("sk") String sk,
                   @Param("winner") String winner);
 ```
 
-A `@Modifying` method is always an `UpdateItem` against one item — never a `Query` or `Scan`. The
+`@Update` owns `updateExpression`, `conditionExpression`, `names`, and `values`; do not combine it
+with `@Query`, which is read-only. Create new items with repository `save`/`insert` or the corresponding
+`DynamoDbOperations` methods.
+
+A `@Update` method is always an `UpdateItem` against one item — never a `Query` or `Scan`. The
 partition and sort key are resolved from the method's `@Param`-annotated arguments. There are no
-derived `deleteByX`/`updateByX` methods: a modifying operation is always explicit.
+derived `deleteByX`/`updateByX` methods: an update operation is always explicit.
 
 ### 5.3. PartiQL
 
@@ -888,7 +886,47 @@ List<ArenaItem> findByPkWithPartiQl(String pk);
 ```
 
 Values bind positionally. Supported return types are `List<T>`, `Optional<T>` and a single `T`;
-`Window` pagination over PartiQL is not implemented yet.
+`Window` pagination over PartiQL is not implemented yet. PartiQL is not supported for
+`ItemCollectionRepository` methods because those methods must fold paged query rows into a view; such
+a declaration is rejected at repository bootstrap.
+
+### 5.4. Named queries
+
+Set `namedQueriesLocation` on `@EnableDynamoDbRepositories` to a classpath properties resource. Each
+property key is the domain class's simple name plus the repository method name:
+
+```properties
+Customer.findNamedByEmail=#email = :email
+OrderItemCollection.findNamed=#pk = :pk AND begins_with(#sk, :prefix)
+```
+
+The expression has repository-specific semantics:
+
+- On a normal `DynamoDbRepository` or `SecondaryIndexRepository`, it is a **filter expression** and
+  executes as a `Scan`. The repository method must opt in with `@AllowScan`. A typed secondary-index
+  repository scans its declared index, not the base table.
+- On an `ItemCollectionRepository`, it is a **key-condition expression**. Item-collection folding
+  requires a partition query and therefore cannot use a scan filter.
+
+Named parameters bind exactly as they do for inline `@Query` expressions. An optional method-level
+`@Query` annotation can supply metadata while the properties file supplies the expression text:
+`names`, `values`, `limit` and `consistentRead` are retained. `indexName` is also retained for an
+item-collection query. A typed secondary-index repository always scans the index declared by its
+`@SecondaryIndex` view, while a base-table repository rejects method-level `indexName`. Explicit
+aliases support nonconventional mappings such as `#partition -> pk`; otherwise a conventional
+placeholder such as `#pk` resolves to `pk`.
+
+Named queries are read-only; combining one with `@Update` is rejected during repository bootstrap.
+Resolution follows `queryLookupStrategy` exactly:
+
+- `CREATE` ignores named and `@Query` declarations and derives a PartTree query from the method name.
+  Custom `ItemCollectionRepository` methods therefore cannot use this mode because item-collection
+  views expose no key properties for PartTree derivation.
+- `USE_DECLARED_QUERY` checks the named-query properties first, then method-level `@Query`, and fails
+  repository bootstrap when neither declaration exists.
+- `CREATE_IF_NOT_FOUND` (the default) checks the named-query properties first, then method-level
+  `@Query`, and finally falls back to a derived query. This is also why a named item-collection query
+  resolves before the unsupported-derived-query guard.
 
 ---
 
@@ -964,30 +1002,24 @@ auto-generated key placeholders. Available conditions: `sortEq`, `sortLt`, `sort
 `sortGe`, `sortBetween`, `sortBeginsWith`, plus `filterExpression`, `scanIndexForward`,
 `consistentRead`, `exclusiveStartKey` and `limit`.
 
-### 6.4. Class-less polymorphic reads
-
-When a query returns mixed item kinds and you want each as its real Java type, use the polymorphic
-reads. These require an explicit discriminator (section 2.6):
-
-```java
-EntityQueryResult<List<Object>> rows = operations.queryPolymorphic(
-        "tournament_arena", queryRequest, pageRequest);
-
-for (Object row : rows.getEntity()) {
-    if (row instanceof Match match)   { … }
-    if (row instanceof Player player) { … }
-}
-```
-
-Where the sort key already encodes the type, a polymorphic **container view** (section 3.2) is
-usually the better tool — it needs no discriminator attribute at all.
-
 ---
 
 ## 7. Lifecycle callbacks and events
 
-Both Spring Data callbacks (which may modify the entity) and application events (read-only
-notifications) are published.
+Spring Data callbacks may inspect and replace the entity. Application events are read-only
+notifications consumed with `@EventListener`.
+
+### 7.1. Callbacks
+
+| Callback | Applies to |
+|---|---|
+| `DynamoDbBeforeConvertCallback` | `save`, `insert`, and `saveAll`, before Java-to-item conversion |
+| `DynamoDbBeforeSaveCallback` | `save`, `insert`, and `saveAll`, after `BeforeConvert` and before conversion |
+| `DynamoDbAfterSaveCallback` | `save`, `insert`, and `saveAll`, after a successful write |
+| `DynamoDbAfterConvertCallback` | Standard entity reads after item-to-Java conversion |
+
+Callbacks return the entity that continues through the operation, so they may replace or modify it.
+`update()` and `delete()` do not invoke update/delete callbacks; those operations publish events only.
 
 ```java
 @Component
@@ -1001,17 +1033,57 @@ public class MatchAuditCallback implements DynamoDbBeforeSaveCallback<Match> {
 }
 ```
 
-| Callback                        | When                                      |
-|---------------------------------|-------------------------------------------|
-| `DynamoDbBeforeConvertCallback` | before the entity is converted to an item |
-| `DynamoDbBeforeSaveCallback`    | after `BeforeConvert`, still before the entity is converted and written |
-| `DynamoDbAfterSaveCallback`     | after a successful write                  |
-| `DynamoDbAfterConvertCallback`  | after an item is read back into an entity |
+### 7.2. Application events
 
-Matching events (`DynamoDbBeforeSaveEvent`, `DynamoDbAfterSaveEvent`, `DynamoDbBeforeDeleteEvent`,
-`DynamoDbAfterDeleteEvent`, `DynamoDbBeforeUpdateEvent`, `DynamoDbAfterUpdateEvent`,
-`DynamoDbAfterConvertEvent`) can be consumed with `@EventListener`. `saveAll()` fires callbacks and
-events **per entity**, not once for the batch.
+| Event | Emitted when |
+|---|---|
+| `DynamoDbBeforeSaveEvent` | before a `save`, `insert`, or `saveAll` write |
+| `DynamoDbAfterSaveEvent` | after a `save`, `insert`, or `saveAll` write succeeds |
+| `DynamoDbBeforeUpdateEvent` | before `UpdateItem` |
+| `DynamoDbAfterUpdateEvent` | after `UpdateItem` succeeds |
+| `DynamoDbBeforeDeleteEvent` | before `DeleteItem` |
+| `DynamoDbAfterDeleteEvent` | after `DeleteItem` succeeds |
+| `DynamoDbAfterConvertEvent` | after a standard entity read and its `AfterConvert` callback |
+
+All events extend `DynamoDbMappingEvent<T>`, whose source is the entity (or entity class for an
+expression-based update) and whose `tableName` is the resolved physical table. There is no
+`DynamoDbBeforeConvertEvent`; before-convert behavior is callback-only.
+
+```java
+@Component
+public class MatchAuditListener {
+
+    @EventListener
+    public void onAfterSave(DynamoDbAfterSaveEvent<Match> event) {
+        log.info("Saved {} to {}", event.getSource(), event.getTableName());
+    }
+}
+```
+
+### 7.3. Execution order
+
+For `save()` and `insert()`:
+
+1. `DynamoDbBeforeConvertCallback`
+2. `DynamoDbBeforeSaveCallback`
+3. `DynamoDbBeforeSaveEvent`
+4. Java-to-DynamoDB-item conversion and SDK `PutItem`
+5. `DynamoDbAfterSaveCallback`
+6. `DynamoDbAfterSaveEvent`
+
+For `saveAll()`, steps 1–3 run for every entity first. The chunked `BatchWriteItem` requests then
+complete, including retries for unprocessed items, before steps 5–6 run for every entity. Hooks are
+emitted per entity, not once for the batch.
+
+An entity-based `update()` publishes `BeforeUpdate`, executes `UpdateItem`, then publishes
+`AfterUpdate`. An expression-based update follows the same event order and then converts the returned
+`ALL_NEW` attributes, invoking `AfterConvert` and publishing `AfterConvertEvent`. A delete publishes
+`BeforeDelete`, executes `DeleteItem`, then publishes `AfterDelete`.
+
+Standard entity reads (`findById`, query, scan, PartiQL, and index-query paths) perform item-to-Java
+conversion, invoke `DynamoDbAfterConvertCallback`, and then publish `DynamoDbAfterConvertEvent` for
+each converted entity. Item-collection folding uses its dedicated converter path and does not emit
+per-row after-convert hooks.
 
 ---
 
@@ -1088,19 +1160,19 @@ Override `dynamoDbExceptionTranslator()` to supply your own.
 
 | Annotation                    | Target        | Purpose                                                                |
 |-------------------------------|---------------|------------------------------------------------------------------------|
-| `@Table`                      | type          | Marks a base-table entity. `tableName`, `typeName`, `discriminator`    |
+| `@Table`                      | type          | Marks a base-table entity. `value`/`tableName` select the physical table. |
 | `@SecondaryIndex`             | type          | Marks a read-only index view. `name`/`value`, `tableName`              |
 | `@PartitionKey`               | field/method  | Partition-key component. `value`, `order`. Repeatable                  |
 | `@SortKey`                    | field/method  | Sort-key component. `value`, `order`. Repeatable                       |
 | `@Column`                     | field/method  | Physical attribute name. `value`, `isStatic`                           |
 | `@InnerClass`                 | field         | Flattened embedded object. `startsWith`, `endsWith`, `regex`, `serializeAsNestedMap` |
-| `@AggregateTable`             | type          | Read-only aggregate over a partition or index. `tableName`, `partitionKey`, `sortKey`, `indexName` |
-| `@AggregateItem`              | field         | Routes matched rows onto an aggregate field. `startsWith`, `endsWith`, `regex`, `sortKey` |
+| `@ItemCollectionView`        | type          | Read-only view over a partition or index. `tableName`, `partitionKey`, `sortKey`, `indexName` |
+| `@ItemCollectionMember`      | field         | Routes matched rows onto an item-collection member. `startsWith`, `endsWith`, `regex`, `sortKey` |
 | `@SortKeyTemplate`            | type          | Composed sort key. `value`, `column`. Repeatable                       |
 | `@Derived`                    | field/method  | Reconstructed on read, never written. Only on `@SortKeyTemplate` placeholders |
 | `@Version`                    | field         | Optimistic locking (Spring Data)                                       |
-| `@Query`                      | method        | Explicit key condition / filter / PartiQL / update expression          |
-| `@Modifying`                  | method        | Marks a `@Query` as a single-item `UpdateItem`                         |
+| `@Query`                      | method        | Explicit key condition / filter / PartiQL read query                    |
+| `@Update`                     | method        | Single-item update / condition expression                              |
 | `@AllowScan`                  | method        | Opts a derived method into a full-table `Scan`                         |
 | `@ExpressionName`             | (in `@Query`) | Maps `#alias` to an attribute name                                     |
 | `@ExpressionValue`            | (in `@Query`) | Supplies a constant `:value`                                           |

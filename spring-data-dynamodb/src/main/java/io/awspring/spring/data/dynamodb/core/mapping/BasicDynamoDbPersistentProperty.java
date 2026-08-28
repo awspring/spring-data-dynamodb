@@ -160,17 +160,14 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 				.filter(it -> AnnotatedElementUtils.hasAnnotation(it, annotationType)).findFirst().orElse(null);
 	}
 
-	public boolean isEmbedded() {
-		return false;
-	}
-
 	@Override
 	public boolean isSpecialType() {
 		return false;
 	}
 
+	@Override
 	@Nullable
-	public Class getTypeOfProperty() {
+	public Class<?> getTypeOfProperty() {
 		return null;
 	}
 
@@ -203,14 +200,14 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 	}
 
 	@Override
-	public boolean isAggregateItem() {
-		return isAnnotationPresent(AggregateItem.class);
+	public boolean isItemCollectionMember() {
+		return isAnnotationPresent(ItemCollectionMember.class);
 	}
 
 	@Override
 	@Nullable
-	public AggregateItem getAggregateItem() {
-		return findAnnotation(AggregateItem.class);
+	public ItemCollectionMember getItemCollectionMember() {
+		return findAnnotation(ItemCollectionMember.class);
 	}
 
 	@Override

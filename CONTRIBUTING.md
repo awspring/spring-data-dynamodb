@@ -46,8 +46,10 @@ make docs
 
 It generates:
 
-- reference documentation in `docs/target/generated-docs/`
-- API docs in `target/site/apidocs/`
+- reference documentation at `docs/target/generated-docs/reference/html/reference.html`
+- API docs at `target/site/apidocs/index.html`
+
+The documentation build runs Spotless verification but does not apply formatting changes.
 
 ## **Did you find a bug?**
 

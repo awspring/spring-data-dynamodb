@@ -18,11 +18,14 @@ package io.awspring.spring.data.dynamodb.core.mapping.events;
 import org.springframework.data.mapping.callback.EntityCallback;
 
 /**
+ * Invoked after a save write succeeds.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 @FunctionalInterface
 public interface DynamoDbAfterSaveCallback<T> extends EntityCallback<T> {
 
+	/** @return the entity returned to the caller */
 	T onAfterSave(T entity, String tableName);
 }

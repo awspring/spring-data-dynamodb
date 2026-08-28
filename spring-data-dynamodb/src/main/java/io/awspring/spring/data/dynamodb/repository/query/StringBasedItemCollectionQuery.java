@@ -35,15 +35,16 @@ import org.springframework.util.StringUtils;
  * @author Matej Nedic
  * @since 1.0.0
  */
-public class StringBasedAggregateQuery implements RepositoryQuery {
+public class StringBasedItemCollectionQuery implements RepositoryQuery {
 
 	private final DynamoDbQueryMethod queryMethod;
 	private final DynamoDbOperations operations;
-	private final Query query;
+	private final @Nullable Query query;
 	private final ValueExpressionDelegate valueExpressionDelegate;
-	private final Class<?> aggregateClass;
+	private final Class<?> viewClass;
+	private final @Nullable String namedQueryString;
 
-	public StringBasedAggregateQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations,
+	public StringBasedItemCollectionQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations,
 			ValueExpressionDelegate valueExpressionDelegate) {
 		Assert.isTrue(queryMethod.hasAnnotatedQuery(), "Query method must have an @Query annotation: " + queryMethod);
 
@@ -51,7 +52,20 @@ public class StringBasedAggregateQuery implements RepositoryQuery {
 		this.operations = operations;
 		this.query = queryMethod.getQueryAnnotation();
 		this.valueExpressionDelegate = valueExpressionDelegate;
-		this.aggregateClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
+		this.viewClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
+		this.namedQueryString = null;
+	}
+
+	public StringBasedItemCollectionQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations,
+			ValueExpressionDelegate valueExpressionDelegate, String namedQueryString) {
+		Assert.hasText(namedQueryString, "Named query string must not be null or empty for method: " + queryMethod);
+
+		this.queryMethod = queryMethod;
+		this.operations = operations;
+		this.query = queryMethod.getQueryAnnotation();
+		this.valueExpressionDelegate = valueExpressionDelegate;
+		this.viewClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
+		this.namedQueryString = namedQueryString;
 	}
 
 	@Override
@@ -65,20 +79,21 @@ public class StringBasedAggregateQuery implements RepositoryQuery {
 	public Object execute(Object[] parameters) {
 		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(queryMethod, parameters);
 
-		if (!StringUtils.hasText(query.keyConditionExpression())) {
+		String keyConditionExpression = namedQueryString != null ? namedQueryString
+				: query != null ? query.keyConditionExpression() : null;
+		if (!StringUtils.hasText(keyConditionExpression)) {
 			throw new InvalidDataAccessApiUsageException(
-					"@Query on an AggregateRepository method requires keyConditionExpression() to be set. "
-							+ "Scan-based aggregate reads are not supported (the fold requires a PK equality). "
-							+ "Method: " + queryMethod);
+					"ItemCollectionRepository query requires a key condition. Use @Query(keyConditionExpression=...) "
+							+ "or a named query property. Method: " + queryMethod);
 		}
 
-		var key = bind(query.keyConditionExpression(), accessor);
+		var key = bind(keyConditionExpression, accessor);
 
-		Map<String, String> names = expressionNames();
+		Map<String, String> names = expressionNames(key.expression());
 		Map<String, Object> values = new LinkedHashMap<>(key.values());
 
 		String filterExpression = null;
-		if (StringUtils.hasText(query.filterExpression())) {
+		if (query != null && StringUtils.hasText(query.filterExpression())) {
 			var filter = bind(query.filterExpression(), accessor);
 			filterExpression = filter.expression();
 			values.putAll(filter.values());
@@ -90,9 +105,9 @@ public class StringBasedAggregateQuery implements RepositoryQuery {
 				.withKeyConditionExpression(key.expression())
 				.withExpressionAttributeNames(names.isEmpty() ? null : names)
 				.withExpressionAttributeValues(values.isEmpty() ? null : values)
-				.withConsistentRead(query.consistentRead());
+				.withConsistentRead(query != null && query.consistentRead());
 
-		if (StringUtils.hasText(query.indexName())) {
+		if (query != null && StringUtils.hasText(query.indexName())) {
 			builder.withIndexName(query.indexName());
 		}
 
@@ -100,9 +115,10 @@ public class StringBasedAggregateQuery implements RepositoryQuery {
 			builder.withFilterExpression(filterExpression);
 		}
 
+		Integer pageLimit = query != null && query.limit() > 0 ? query.limit() : null;
 		DynamoDbQueryRequest request = builder.build();
-		EntityQueryResult<Object> result = (EntityQueryResult<Object>) operations.queryAggregate(aggregateClass,
-				request, DynamoDbPageRequest.of(null));
+		EntityQueryResult<Object> result = (EntityQueryResult<Object>) operations.queryItemCollection(viewClass,
+				request, DynamoDbPageRequest.of(pageLimit));
 
 		return unwrap(result);
 	}
@@ -126,8 +142,13 @@ public class StringBasedAggregateQuery implements RepositoryQuery {
 		return QueryExpressions.bind(valueExpressionDelegate, queryMethod.getParameters(), rawExpression, accessor);
 	}
 
-	private Map<String, String> expressionNames() {
-		return QueryExpressions.expressionNames(query);
+	private Map<String, String> expressionNames(String keyConditionExpression) {
+		Map<String, String> names = QueryExpressions.expressionNames(query);
+		if (namedQueryString == null) {
+			return names;
+		}
+		DynamoDbQuerySpec spec = DynamoDbQuerySpec.forRawKeyCondition(null, keyConditionExpression, names, Map.of());
+		return spec.resolveExpressionAttributeNames(keyConditionExpression);
 	}
 
 	private void applyExpressionValues(Map<String, Object> values, ParameterAccessor accessor) {

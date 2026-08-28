@@ -17,6 +17,7 @@ package io.awspring.spring.data.dynamodb.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
@@ -25,9 +26,12 @@ import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
+import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
+import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 
 @DisplayName("StatementFactory -- builds AWS SDK request objects from entities")
@@ -67,6 +71,32 @@ class StatementFactoryTest {
 		assertEquals("#__pk", request.projectionExpression());
 		assertTrue(request.key().containsKey("tournamentId"));
 		assertTrue(request.key().containsKey("matchId"));
+	}
+
+	@Test
+	@DisplayName("strongly consistent GSI queries are rejected before reaching the SDK")
+	void stronglyConsistentGsiQueriesAreRejectedBeforeReachingTheSdk() {
+		DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(Match.class);
+		DynamoDbQueryRequest request = DynamoDbQueryRequest.Builder.request().withIndexName("gsi1")
+				.withConsistentRead(Boolean.TRUE).build();
+
+		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> statementFactory.query("orders", entity, request, null));
+
+		assertTrue(ex.getMessage().contains("eventually consistent"));
+	}
+
+	@Test
+	@DisplayName("strongly consistent GSI scans are rejected before reaching the SDK")
+	void stronglyConsistentGsiScansAreRejectedBeforeReachingTheSdk() {
+		DynamoDbPersistentEntity<?> entity = mappingContext.getRequiredPersistentEntity(Match.class);
+		DynamoDbScanRequest request = DynamoDbScanRequest.Builder.builder().withIndexName("gsi1")
+				.withConsistentRead(true).build();
+
+		InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> statementFactory.scan("orders", request, entity));
+
+		assertTrue(ex.getMessage().contains("eventually consistent"));
 	}
 
 	@Table(tableName = "orders")

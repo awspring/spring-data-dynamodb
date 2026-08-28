@@ -15,13 +15,17 @@
  */
 package io.awspring.spring.data.dynamodb.repository.config;
 
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
+import io.awspring.spring.data.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
+import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.SimpleDynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.support.DynamoDbRepositoryFactoryBean;
 import java.lang.annotation.Annotation;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.List;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.data.repository.config.AnnotationRepositoryConfigurationSource;
 import org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport;
@@ -75,11 +79,11 @@ public class DynamoDbRepositoryConfigurationExtension extends RepositoryConfigur
 
 	@Override
 	protected Collection<Class<? extends Annotation>> getIdentifyingAnnotations() {
-		return Collections.singleton(Table.class);
+		return List.of(Table.class, SecondaryIndex.class, ItemCollectionView.class);
 	}
 
 	@Override
 	protected Collection<Class<?>> getIdentifyingTypes() {
-		return Collections.singleton(DynamoDbRepository.class);
+		return List.of(DynamoDbRepository.class, SecondaryIndexRepository.class, ItemCollectionRepository.class);
 	}
 }

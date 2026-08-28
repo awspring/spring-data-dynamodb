@@ -18,6 +18,8 @@ package io.awspring.spring.data.dynamodb.request;
 import java.util.Map;
 
 /**
+ * Condition expression and values for a DynamoDB write.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

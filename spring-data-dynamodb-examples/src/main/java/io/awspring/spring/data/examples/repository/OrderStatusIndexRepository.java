@@ -15,14 +15,14 @@
  */
 package io.awspring.spring.data.examples.repository;
 
-import io.awspring.spring.data.examples.model.OrderByIndex;
-import io.awspring.spring.data.dynamodb.repository.AggregateRepository;
+import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
+import io.awspring.spring.data.examples.model.OrderStatusIndex;
+import java.util.List;
 import org.springframework.stereotype.Repository;
 
-/**
- * @author Matej Nedic
- * @since 1.0.0
- */
+/** Queries the typed, read-only GSI1 order projection. */
 @Repository
-public interface OrderByIndexRepository extends AggregateRepository<OrderByIndex> {
+public interface OrderStatusIndexRepository extends SecondaryIndexRepository<OrderStatusIndex> {
+
+	List<OrderStatusIndex> findTop2ByStatusKeyOrderByCreatedAtKeyDesc(String statusKey);
 }

@@ -22,6 +22,7 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.spring.data.dynamodb.request.IndexQueryBuilder;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -87,8 +88,8 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(getQueryMethod(),
 				parameters);
 
-		if (getQueryMethod().isModifyingQuery()) {
-			return executeModifying(accessor);
+		if (getQueryMethod().isUpdateQuery()) {
+			return executeUpdate(accessor);
 		}
 
 		if (getQueryMethod().isPartiQlQuery()) {
@@ -135,15 +136,15 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 	}
 
 	@Nullable
-	private Object executeModifying(ParameterAccessor accessor) {
-		ModifyingUpdate update = createUpdateRequest(accessor);
+	private Object executeUpdate(ParameterAccessor accessor) {
+		UpdateExecution update = createUpdateRequest(accessor);
 		Object updated = getOperations()
 				.update(update.partitionKey(), update.sortKey(), update.request(), getDomainClass()).getEntity();
-		return modifyingResult(updated);
+		return updateResult(updated);
 	}
 
 	@Nullable
-	private Object modifyingResult(@Nullable Object updated) {
+	private Object updateResult(@Nullable Object updated) {
 
 		Class<?> returnType = getQueryMethod().getDeclaredReturnType();
 
@@ -162,11 +163,11 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		return updated;
 	}
 
-	protected ModifyingUpdate createUpdateRequest(ParameterAccessor accessor) {
-		throw new UnsupportedOperationException(getClass().getSimpleName() + " does not support @Modifying execution.");
+	protected UpdateExecution createUpdateRequest(ParameterAccessor accessor) {
+		throw new UnsupportedOperationException(getClass().getSimpleName() + " does not support @Update execution.");
 	}
 
-	protected record ModifyingUpdate(Object partitionKey, @Nullable Object sortKey,
+	protected record UpdateExecution(Object partitionKey, @Nullable Object sortKey,
 			DynamoDbUpdateExpressionRequest request) {
 	}
 
@@ -205,6 +206,13 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		Map<String, Object> exclusiveStartKey = exclusiveStartKeyFrom(accessor);
 		Integer limit = resolveLimit(spec, accessor);
 
+		if (limit != null && spec.filterExpression() != null) {
+			return executeFilteredLimited(spec, domainClass, exclusiveStartKey, limit);
+		}
+		if (limit == null && getQueryMethod().isCollectionQuery()) {
+			return executeAllPages(spec, domainClass, exclusiveStartKey);
+		}
+
 		EntityQueryResult<List<Object>> result = executePage(spec, domainClass, exclusiveStartKey, limit);
 
 		while (getQueryMethod().isScrollQuery() && result.getEntity().isEmpty()) {
@@ -216,6 +224,45 @@ public abstract class AbstractDynamoDbQuery implements RepositoryQuery {
 		}
 
 		return result;
+	}
+
+	private EntityQueryResult<List<Object>> executeAllPages(DynamoDbQuerySpec spec, Class<?> domainClass,
+			@Nullable Map<String, Object> exclusiveStartKey) {
+
+		List<Object> items = new ArrayList<>();
+		Map<String, Object> nextStartKey = exclusiveStartKey;
+		do {
+			EntityQueryResult<List<Object>> page = executePage(spec, domainClass, nextStartKey, null);
+			items.addAll(page.getEntity());
+			nextStartKey = page.getLastEvaluatedKey();
+		}
+		while (nextStartKey != null && !nextStartKey.isEmpty());
+		return EntityQueryResult.of(items, items.size());
+	}
+
+	private EntityQueryResult<List<Object>> executeFilteredLimited(DynamoDbQuerySpec spec, Class<?> domainClass,
+			@Nullable Map<String, Object> exclusiveStartKey, int limit) {
+
+		List<Object> matches = new ArrayList<>(limit);
+		Map<String, Object> nextStartKey = exclusiveStartKey;
+		Map<String, Object> lastEvaluatedKey = null;
+
+		do {
+			int remaining = limit - matches.size();
+			EntityQueryResult<List<Object>> page = executePage(spec, domainClass, nextStartKey, remaining);
+			List<Object> pageMatches = page.getEntity();
+			if (pageMatches.size() <= remaining) {
+				matches.addAll(pageMatches);
+			}
+			else {
+				matches.addAll(pageMatches.subList(0, remaining));
+			}
+			lastEvaluatedKey = page.getLastEvaluatedKey();
+			nextStartKey = lastEvaluatedKey;
+		}
+		while (matches.size() < limit && nextStartKey != null && !nextStartKey.isEmpty());
+
+		return EntityQueryResult.of(matches, matches.size(), lastEvaluatedKey);
 	}
 
 	@SuppressWarnings("unchecked")

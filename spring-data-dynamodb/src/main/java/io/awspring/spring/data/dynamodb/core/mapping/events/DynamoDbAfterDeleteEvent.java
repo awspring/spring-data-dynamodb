@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core.mapping.events;
 
 /**
+ * Published after a {@code DeleteItem} request succeeds.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

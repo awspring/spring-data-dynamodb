@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
@@ -34,7 +35,7 @@ import io.awspring.spring.data.dynamodb.entities.ArenaRow;
 import io.awspring.spring.data.dynamodb.entities.Player;
 import io.awspring.spring.data.dynamodb.entities.PlayerCard;
 import io.awspring.spring.data.dynamodb.entities.Team;
-import io.awspring.spring.data.dynamodb.entities.arena.MatchAggregate;
+import io.awspring.spring.data.dynamodb.entities.arena.MatchItemCollection;
 import io.awspring.spring.data.dynamodb.entities.arena.MatchSK;
 import io.awspring.spring.data.dynamodb.entities.arena.MatchStatus;
 import io.awspring.spring.data.dynamodb.entities.arena.MatchTable;
@@ -56,6 +57,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mapping.callback.EntityCallbacks;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -193,6 +195,24 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 		}
 
 		@Test
+		@DisplayName("insert persists a new entity and rejects a duplicate key")
+		void insert_duplicateKey_preservesExistingItem() {
+			String id = "insert-only-id";
+			LocalDate originalDate = LocalDate.of(2026, 1, 10);
+			PlayerCardEntity original = new PlayerCardEntity(id, originalDate);
+
+			dynamoDbTemplate.insert(original);
+
+			PlayerCardEntity duplicate = new PlayerCardEntity(id, originalDate.plusDays(1));
+			assertThrows(DuplicateKeyException.class, () -> dynamoDbTemplate.insert(duplicate));
+
+			Map<String, AttributeValue> stored = getItemByKey(PLAYER_CARD_ENTITY_TABLE,
+					Map.of("id", AttributeValue.builder().s(id).build()));
+			assertEquals(originalDate, LocalDate.parse(stored.get("registeredOn").s()),
+					"duplicate insert must not overwrite the existing item");
+		}
+
+		@Test
 		@DisplayName("save persists ArenaRow with flattened inner class properties")
 		void save_arenaRowWithInnerClass_flattensCorrectly() {
 			createTableIfAbsent(CreateTableRequest.builder().tableName(ARENA_TABLE_EXTENDED).attributeDefinitions(
@@ -234,12 +254,12 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 	}
 
 	@Nested
-	@DisplayName("Single-table design (polymorphic container)")
+	@DisplayName("Single-table design")
 	class SingleTableDesign {
 
 		@Test
-		@DisplayName("save and query polymorphic items in a single table with PartiQL and DynamoDB query")
-		void saveAndQuery_polymorphicItems_routesCorrectly() {
+		@DisplayName("saves and queries heterogeneous rows with PartiQL and DynamoDB query")
+		void saveAndQuery_heterogeneousRows_routesCorrectly() {
 			clearTable(ARENA_TABLE, "partitionKey", "sortKey");
 
 			Venue venue = new Venue("Zagreb", 10000L, "Trg bana Josipa Jelacica", "Hrvatska");
@@ -268,9 +288,10 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 
 			MatchTable matchTable = dynamoDbTemplate.findById(PLAYER_PK, MATCH_SK, MatchTable.class);
 
-			assertAll("polymorphic query results",
-					() -> assertIterableEquals(List.of(shopTable1, shopTable2), properDynamoQuery.getEntity()),
-					() -> assertIterableEquals(List.of(shopTable2, shopTable1), sqlTypeQueryResult.getEntity()),
+			assertAll("single-table query results",
+					() -> assertIterableEquals(List.of(shopTable2, shopTable1), properDynamoQuery.getEntity()),
+					() -> assertEquals(2, sqlTypeQueryResult.getEntity().size()),
+					() -> assertTrue(sqlTypeQueryResult.getEntity().containsAll(List.of(shopTable1, shopTable2))),
 					() -> assertEquals(matchTable, shopTable2),
 					() -> assertEquals(properDynamoQuery.getEntity().size(), secondQuery.getEntity().size()));
 
@@ -295,12 +316,12 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 	}
 
 	@Nested
-	@DisplayName("Aggregate query")
-	class AggregateQuery {
+	@DisplayName("ItemCollection query")
+	class ItemCollectionQuery {
 
 		@Test
-		@DisplayName("queryAggregate folds multiple item types into typed aggregate slots")
-		void queryAggregate_multipleItemTypes_foldsCorrectly() {
+		@DisplayName("queryItemCollection folds multiple item types into typed view slots")
+		void queryItemCollection_multipleItemTypes_foldsCorrectly() {
 			clearTable(ARENA_TABLE, "partitionKey", "sortKey");
 
 			Venue venue = new Venue("Zagreb", 10000L, "Trg bana Josipa Jelacica", "Hrvatska");
@@ -326,12 +347,12 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 			DynamoDbQueryRequest dq = DynamoDbQueryRequest.request().withKeyConditionExpression("partitionKey = :pk")
 					.withExpressionAttributeValues(Map.of(":pk", PLAYER_PK)).build();
 
-			EntityQueryResult<MatchAggregate> secondQuery = dynamoDbTemplate.queryAggregate(MatchAggregate.class, dq,
-					null);
+			EntityQueryResult<MatchItemCollection> secondQuery = dynamoDbTemplate
+					.queryItemCollection(MatchItemCollection.class, dq, null);
 
 			MatchTable matchTable = dynamoDbTemplate.findById(PLAYER_PK, MATCH_SK, MatchTable.class);
 
-			assertAll("aggregate routing",
+			assertAll("view routing",
 					() -> assertEquals(matchTable2.getMatch(), secondQuery.getEntity().getMatch().get(0)),
 					() -> assertEquals(matchTable3.getMatch(), secondQuery.getEntity().getMatch().get(1)));
 
@@ -440,6 +461,39 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 	@Nested
 	@DisplayName("Update operations")
 	class UpdateOperations {
+
+		@Test
+		@DisplayName("update clears flattened inner-class columns when the property becomes null")
+		void update_flattenedInnerClassToNull_clearsStoredColumns() {
+			createTableIfAbsent(CreateTableRequest.builder().tableName(ARENA_TABLE_EXTENDED).attributeDefinitions(
+					AttributeDefinition.builder().attributeName("partitionKey").attributeType(ScalarAttributeType.S)
+							.build(),
+					AttributeDefinition.builder().attributeName("sortKey").attributeType(ScalarAttributeType.S).build())
+					.keySchema(KeySchemaElement.builder().attributeName("partitionKey").keyType(KeyType.HASH).build(),
+							KeySchemaElement.builder().attributeName("sortKey").keyType(KeyType.RANGE).build())
+					.provisionedThroughput(
+							ProvisionedThroughput.builder().readCapacityUnits(10L).writeCapacityUnits(10L).build())
+					.build());
+			clearTable(ARENA_TABLE_EXTENDED, "partitionKey", "sortKey");
+
+			ArenaRow arenaRow = new ArenaRow("null-update", "team", new Team("Cloud Esports", "CLE", "NA"), null);
+			dynamoDbTemplate.save(arenaRow);
+
+			Map<String, AttributeValue> key = Map.of("partitionKey",
+					AttributeValue.builder().s(arenaRow.getPartitionKey()).build(), "sortKey",
+					AttributeValue.builder().s(arenaRow.getSortKey()).build());
+			Map<String, AttributeValue> before = getItemByKey(ARENA_TABLE_EXTENDED, key);
+			assertAll("flattened columns exist before update",
+					() -> assertEquals("Cloud Esports", before.get("name").s()),
+					() -> assertEquals("CLE", before.get("tag").s()));
+
+			arenaRow.setTeam(null);
+			dynamoDbTemplate.update(arenaRow);
+
+			Map<String, AttributeValue> after = getItemByKey(ARENA_TABLE_EXTENDED, key);
+			assertAll("flattened columns are explicitly cleared", () -> assertTrue(after.get("name").nul()),
+					() -> assertTrue(after.get("tag").nul()));
+		}
 
 		@Test
 		@DisplayName("update modifies fields and adds collection elements")

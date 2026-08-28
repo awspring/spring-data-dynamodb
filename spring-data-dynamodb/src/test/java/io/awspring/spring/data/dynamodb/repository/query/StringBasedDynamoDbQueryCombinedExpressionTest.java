@@ -17,9 +17,9 @@ package io.awspring.spring.data.dynamodb.repository.query;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
@@ -29,13 +29,14 @@ import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.AllowScan;
 import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.ExpressionValue;
-import io.awspring.spring.data.dynamodb.repository.Modifying;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -75,10 +76,6 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 		List<Match> findInRangeInRegion(@Param("pk") String pk, @Param("from") String from, @Param("to") String to,
 				@Param("region") String region);
 
-		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#region = :region", indexName = INDEX_GSI1, limit = 10, conditionExpression = "attribute_exists(#pk)", names = {
-				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#region", value = "region") })
-		List<Match> findWithStrayConditionExpression(@Param("pk") String pk, @Param("region") String region);
-
 		@Query(keyConditionExpression = "#pk = :pk", filterExpression = "#round = :round", indexName = INDEX_GSI1, limit = 5, consistentRead = true, names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#round", value = "round") })
 		List<Match> findConsistentlyLimited(@Param("pk") String pk, @Param("round") String round);
@@ -102,28 +99,24 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 		@Query(filterExpression = "#undeclared = :region", limit = 4)
 		List<Match> scanWithUndeclaredFilterAlias(@Param("region") String region);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", conditionExpression = "attribute_exists(#pk) AND #round = :round", names = {
+		@Update(updateExpression = "SET #winner = :winner", conditionExpression = "attribute_exists(#pk) AND #round = :round", names = {
 				@ExpressionName(name = "#winner", value = "winner"), @ExpressionName(name = "#pk", value = "pk"),
 				@ExpressionName(name = "#round", value = "round") })
 		Match recordWinner(@Param("pk") String pk, @Param("sk") String sk, @Param("winner") String winner,
 				@Param("round") String round);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", conditionExpression = "#round = :expectedRound", names = {
+		@Update(updateExpression = "SET #winner = :winner", conditionExpression = "#round = :expectedRound", names = {
 				@ExpressionName(name = "#winner", value = "winner"),
 				@ExpressionName(name = "#round", value = "round") }, values = @ExpressionValue(name = ":expectedRound", value = "FINAL"))
 		Match recordWinnerInFinal(@Param("pk") String pk, @Param("sk") String sk, @Param("winner") String winner);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", conditionExpression = "#round = :expectedRound", names = {
+		@Update(updateExpression = "SET #winner = :winner", conditionExpression = "#round = :expectedRound", names = {
 				@ExpressionName(name = "#winner", value = "winner"),
 				@ExpressionName(name = "#round", value = "round") }, values = @ExpressionValue(name = ":expectedRound", value = "#{'FIN' + 'AL'}"))
 		Match recordWinnerInFinalViaSpel(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		Match recordWinnerUnconditionally(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
 	}
@@ -220,17 +213,12 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 	class LimitTests {
 
 		@Test
-		@DisplayName("consistentRead applies when combined with a filter and a limit")
-		void consistentReadAppliesWhenCombinedWithAFilterAndALimit() throws NoSuchMethodException {
+		@DisplayName("consistentRead on a GSI is rejected before filter and limit execution")
+		void consistentReadOnAGsiIsRejectedBeforeFilterAndLimitExecution() {
 			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-			StringBasedDynamoDbQuery query = queryFor(operations, "findConsistentlyLimited", String.class,
-					String.class);
 
-			query.execute(new Object[] { PK_TOURNAMENT, ROUND_FINAL });
-
-			assertAll(() -> assertEquals(Boolean.TRUE, operations.lastCapturedRequest.getConsistentRead()),
-					() -> assertEquals("#round = :round", operations.lastCapturedRequest.getFilterExpression()),
-					() -> assertEquals(5, operations.lastCapturedPageRequest.getLimit()));
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> queryFor(operations, "findConsistentlyLimited", String.class, String.class));
 		}
 
 		@Test
@@ -281,30 +269,6 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 	}
 
 	@Nested
-	@DisplayName("conditionExpression handling on read queries")
-	class ConditionExpressionOnReadTests {
-
-		@Test
-		@DisplayName("conditionExpression is ignored on a read query")
-		void conditionExpressionIsIgnoredOnAReadQuery() throws NoSuchMethodException {
-			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
-			StringBasedDynamoDbQuery query = queryFor(operations, "findWithStrayConditionExpression", String.class,
-					String.class);
-
-			query.execute(new Object[] { PK_TOURNAMENT, REGION_EU });
-
-			assertAll(() -> assertEquals("#pk = :pk", operations.lastCapturedRequest.getKeyConditionExpression()),
-					() -> assertEquals("#region = :region", operations.lastCapturedRequest.getFilterExpression()),
-					() -> assertEquals(10, operations.lastCapturedPageRequest.getLimit()),
-					() -> assertFalse(operations.lastCapturedRequest.getFilterExpression().contains("attribute_exists"),
-							"conditionExpression must not be folded into the filterExpression"),
-					() -> assertFalse(
-							operations.lastCapturedRequest.getKeyConditionExpression().contains("attribute_exists"),
-							"conditionExpression must not be folded into the keyConditionExpression"));
-		}
-	}
-
-	@Nested
 	@DisplayName("Undeclared alias auto-resolution")
 	class UndeclaredAliasTests {
 
@@ -338,8 +302,8 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 	}
 
 	@Nested
-	@DisplayName("@Modifying update expression handling")
-	class ModifyingUpdateTests {
+	@DisplayName("@Update update expression handling")
+	class UpdateExecutionTests {
 
 		@Test
 		@DisplayName("updateExpression and conditionExpression both land on the update request")
@@ -350,7 +314,7 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
 					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7", ROUND_FINAL);
-			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
+			AbstractDynamoDbQuery.UpdateExecution update = query.createUpdateRequest(accessor);
 
 			assertAll(
 					() -> assertEquals(PK_TOURNAMENT, update.partitionKey(),
@@ -370,7 +334,7 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
 					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7", ROUND_FINAL);
-			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
+			AbstractDynamoDbQuery.UpdateExecution update = query.createUpdateRequest(accessor);
 
 			var values = update.request().getExpressionAttributeValues();
 			var names = update.request().getExpressionAttributeNames();
@@ -390,7 +354,7 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
 					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
-			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
+			AbstractDynamoDbQuery.UpdateExecution update = query.createUpdateRequest(accessor);
 
 			assertAll(() -> assertEquals("#round = :expectedRound", update.request().getConditionExpression()),
 					() -> assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
@@ -407,7 +371,7 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
 					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
-			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
+			AbstractDynamoDbQuery.UpdateExecution update = query.createUpdateRequest(accessor);
 
 			assertEquals("FINAL", update.request().getExpressionAttributeValues().get(":expectedRound"),
 					"a #{...} @ExpressionValue is evaluated as SpEL rather than passed through");
@@ -422,7 +386,7 @@ class StringBasedDynamoDbQueryCombinedExpressionTest {
 
 			DynamoDbParametersParameterAccessor accessor = new DynamoDbParametersParameterAccessor(
 					query.getQueryMethod(), PK_TOURNAMENT, "MATCH#m1", "player-7");
-			AbstractDynamoDbQuery.ModifyingUpdate update = query.createUpdateRequest(accessor);
+			AbstractDynamoDbQuery.UpdateExecution update = query.createUpdateRequest(accessor);
 
 			assertAll(() -> assertEquals("SET #winner = :winner", update.request().getUpdateExpression()),
 					() -> assertNull(update.request().getConditionExpression(),

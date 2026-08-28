@@ -24,14 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
-import io.awspring.spring.data.dynamodb.repository.AggregateRepository;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.time.Duration;
@@ -59,7 +59,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer {
+public class ItemCollectionRepositoryIntegrationTest extends LocalStackTestContainer {
 
 	private static final String TABLE_NAME = "commerce";
 	private static final String CUSTOMER_PK = "CUSTOMER#1";
@@ -73,7 +73,7 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 	private AnnotationConfigApplicationContext context;
 	private OrderRepository orderRepository;
 	private OrderItemRepository orderItemRepository;
-	private OrderAggregateRepository aggregateRepository;
+	private OrderItemCollectionRepository itemCollectionRepository;
 
 	@Table(tableName = TABLE_NAME)
 	public static class Order {
@@ -173,14 +173,14 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		}
 	}
 
-	@AggregateTable(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
-	public static class OrderAggregate {
-		@AggregateItem(startsWith = "ORDER#")
+	@ItemCollectionView(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
+	public static class OrderItemCollection {
+		@ItemCollectionMember(startsWith = "ORDER#")
 		private Order order;
-		@AggregateItem(startsWith = "ITEM#")
+		@ItemCollectionMember(startsWith = "ITEM#")
 		private List<OrderItem> items;
 
-		public OrderAggregate() {
+		public OrderItemCollection() {
 		}
 
 		public Order getOrder() {
@@ -198,14 +198,17 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 	public interface OrderItemRepository extends DynamoDbRepository<OrderItem, String> {
 	}
 
-	public interface OrderAggregateRepository extends AggregateRepository<OrderAggregate> {
+	public interface OrderItemCollectionRepository extends ItemCollectionRepository<OrderItemCollection> {
 
 		@Query(keyConditionExpression = "#pk = :pk AND begins_with(#sk, :prefix)", names = {
 				@ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#sk", value = "sk") })
-		Optional<OrderAggregate> loadWithPrefix(@Param("pk") String pk, @Param("prefix") String prefix);
+		Optional<OrderItemCollection> loadWithPrefix(@Param("pk") String pk, @Param("prefix") String prefix);
+
+		@Query(names = { @ExpressionName(name = "#pk", value = "pk"), @ExpressionName(name = "#sk", value = "sk") })
+		Optional<OrderItemCollection> findNamedByPrefix(@Param("pk") String pk, @Param("prefix") String prefix);
 	}
 
-	@EnableDynamoDbRepositories(basePackageClasses = AggregateRepositoryIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!AggregateRepositoryIntegrationTest\\$).*"))
+	@EnableDynamoDbRepositories(basePackageClasses = ItemCollectionRepositoryIntegrationTest.class, considerNestedRepositories = true, namedQueriesLocation = "classpath:dynamodb-named-queries-test.properties", excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!ItemCollectionRepositoryIntegrationTest\\$).*"))
 	static class TestConfig extends AbstractDynamoDbConfiguration {
 
 		private final DynamoDbClient dynamoDbClient;
@@ -241,7 +244,7 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		context.refresh();
 		orderRepository = context.getBean(OrderRepository.class);
 		orderItemRepository = context.getBean(OrderItemRepository.class);
-		aggregateRepository = context.getBean(OrderAggregateRepository.class);
+		itemCollectionRepository = context.getBean(OrderItemCollectionRepository.class);
 	}
 
 	@AfterEach
@@ -281,19 +284,19 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 	class PartitionQuery {
 
 		@Test
-		@DisplayName("findByPartitionKey folds the entire partition into a typed aggregate")
-		void findByPartitionKey_withHeterogeneousRows_foldsIntoAggregate() {
+		@DisplayName("findByPartitionKey folds the entire partition into a typed view")
+		void findByPartitionKey_withHeterogeneousRows_foldsIntoItemCollection() {
 			seedPartition();
 
-			Optional<OrderAggregate> result = aggregateRepository.findByPartitionKey(CUSTOMER_PK);
+			Optional<OrderItemCollection> result = itemCollectionRepository.findByPartitionKey(CUSTOMER_PK);
 
 			assertTrue(result.isPresent());
-			OrderAggregate aggregate = result.get();
-			assertAll("aggregate contains the order and all items",
-					() -> assertNotNull(aggregate.getOrder(), "order slot must be populated"),
-					() -> assertEquals(ORDER_STATUS, aggregate.getOrder().getStatus()),
-					() -> assertNotNull(aggregate.getItems(), "items list must be populated"),
-					() -> assertEquals(EXPECTED_ITEM_COUNT, aggregate.getItems().size()));
+			OrderItemCollection view = result.get();
+			assertAll("view contains the order and all items",
+					() -> assertNotNull(view.getOrder(), "order slot must be populated"),
+					() -> assertEquals(ORDER_STATUS, view.getOrder().getStatus()),
+					() -> assertNotNull(view.getItems(), "items list must be populated"),
+					() -> assertEquals(EXPECTED_ITEM_COUNT, view.getItems().size()));
 		}
 	}
 
@@ -306,13 +309,14 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		void findByPartitionKeyAndSortKey_exactMatch_returnsOnlyOrderRow() {
 			seedPartition();
 
-			Optional<OrderAggregate> result = aggregateRepository.findByPartitionKeyAndSortKey(CUSTOMER_PK, ORDER_SK);
+			Optional<OrderItemCollection> result = itemCollectionRepository.findByPartitionKeyAndSortKey(CUSTOMER_PK,
+					ORDER_SK);
 
 			assertTrue(result.isPresent());
-			OrderAggregate aggregate = result.get();
-			assertAll("point read returns only the ORDER row", () -> assertNotNull(aggregate.getOrder()),
-					() -> assertEquals(ORDER_STATUS, aggregate.getOrder().getStatus()),
-					() -> assertTrue(aggregate.getItems() == null || aggregate.getItems().isEmpty(),
+			OrderItemCollection view = result.get();
+			assertAll("point read returns only the ORDER row", () -> assertNotNull(view.getOrder()),
+					() -> assertEquals(ORDER_STATUS, view.getOrder().getStatus()),
+					() -> assertTrue(view.getItems() == null || view.getItems().isEmpty(),
 							"point read on ORDER# should not include ITEM# rows"));
 		}
 	}
@@ -326,14 +330,14 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		void findByPkAndSkStartingWith_itemPrefix_returnsOnlyItems() {
 			seedPartition();
 
-			Optional<OrderAggregate> result = aggregateRepository.findByPartitionKeyAndSortKeyStartingWith(CUSTOMER_PK,
-					ITEM_PREFIX);
+			Optional<OrderItemCollection> result = itemCollectionRepository
+					.findByPartitionKeyAndSortKeyStartingWith(CUSTOMER_PK, ITEM_PREFIX);
 
 			assertTrue(result.isPresent());
-			OrderAggregate aggregate = result.get();
+			OrderItemCollection view = result.get();
 			assertAll("prefix query returns only ITEM# rows",
-					() -> assertNull(aggregate.getOrder(), "ORDER# row should not be included in ITEM# prefix query"),
-					() -> assertEquals(EXPECTED_ITEM_COUNT, aggregate.getItems().size()));
+					() -> assertNull(view.getOrder(), "ORDER# row should not be included in ITEM# prefix query"),
+					() -> assertEquals(EXPECTED_ITEM_COUNT, view.getItems().size()));
 		}
 	}
 
@@ -346,8 +350,26 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 		void existsByPartitionKey_populatedAndMissing_correctBooleans() {
 			seedPartition();
 
-			assertAll("existence checks", () -> assertTrue(aggregateRepository.existsByPartitionKey(CUSTOMER_PK)),
-					() -> assertFalse(aggregateRepository.existsByPartitionKey(NONEXISTENT_PK)));
+			assertAll("existence checks", () -> assertTrue(itemCollectionRepository.existsByPartitionKey(CUSTOMER_PK)),
+					() -> assertFalse(itemCollectionRepository.existsByPartitionKey(NONEXISTENT_PK)));
+		}
+	}
+
+	@Nested
+	@DisplayName("Named query support")
+	class NamedQuery {
+
+		@Test
+		@DisplayName("named key condition loaded from properties folds item rows")
+		void namedQuery_withItemPrefix_foldsItemCollection() {
+			seedPartition();
+
+			Optional<OrderItemCollection> result = itemCollectionRepository.findNamedByPrefix(CUSTOMER_PK, ITEM_PREFIX);
+
+			assertTrue(result.isPresent());
+			OrderItemCollection view = result.get();
+			assertAll("named query returns only ITEM# rows", () -> assertNull(view.getOrder()),
+					() -> assertEquals(EXPECTED_ITEM_COUNT, view.getItems().size()));
 		}
 	}
 
@@ -356,16 +378,16 @@ public class AggregateRepositoryIntegrationTest extends LocalStackTestContainer 
 	class AnnotationQuery {
 
 		@Test
-		@DisplayName("@Query passthrough folds items into the aggregate")
-		void queryAnnotation_withItemPrefix_foldsAggregate() {
+		@DisplayName("@Query passthrough folds items into the view")
+		void queryAnnotation_withItemPrefix_foldsItemCollection() {
 			seedPartition();
 
-			Optional<OrderAggregate> result = aggregateRepository.loadWithPrefix(CUSTOMER_PK, ITEM_PREFIX);
+			Optional<OrderItemCollection> result = itemCollectionRepository.loadWithPrefix(CUSTOMER_PK, ITEM_PREFIX);
 
 			assertTrue(result.isPresent());
-			OrderAggregate aggregate = result.get();
-			assertAll("@Query returns only ITEM# rows", () -> assertNull(aggregate.getOrder()),
-					() -> assertEquals(EXPECTED_ITEM_COUNT, aggregate.getItems().size()));
+			OrderItemCollection view = result.get();
+			assertAll("@Query returns only ITEM# rows", () -> assertNull(view.getOrder()),
+					() -> assertEquals(EXPECTED_ITEM_COUNT, view.getItems().size()));
 		}
 	}
 }

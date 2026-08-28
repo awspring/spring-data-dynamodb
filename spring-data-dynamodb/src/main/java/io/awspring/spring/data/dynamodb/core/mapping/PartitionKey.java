@@ -18,6 +18,12 @@ package io.awspring.spring.data.dynamodb.core.mapping;
 import java.lang.annotation.*;
 import org.springframework.data.annotation.Id;
 
+/**
+ * Marks a property as a partition-key component.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Id
 @Retention(value = RetentionPolicy.RUNTIME)
@@ -25,14 +31,27 @@ import org.springframework.data.annotation.Id;
 @Repeatable(PartitionKey.List.class)
 public @interface PartitionKey {
 
+	/**
+	 * @return the physical attribute name, or empty to use the mapped property name
+	 */
 	String value() default "";
 
+	/**
+	 * @return the zero-based position in a composite partition key
+	 */
 	int order() default 0;
 
+	/**
+	 * Holds repeated partition-key declarations.
+	 */
 	@Documented
 	@Retention(value = RetentionPolicy.RUNTIME)
 	@Target(value = { ElementType.ANNOTATION_TYPE, ElementType.FIELD, ElementType.METHOD })
 	@interface List {
+
+		/**
+		 * @return the partition-key declarations
+		 */
 		PartitionKey[] value();
 	}
 }

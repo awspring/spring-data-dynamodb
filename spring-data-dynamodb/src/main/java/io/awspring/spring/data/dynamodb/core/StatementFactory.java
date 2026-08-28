@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -42,6 +43,14 @@ public class StatementFactory {
 
 	public StatementFactory(DynamoDbConverter dynamoDbConverter) {
 		this.dynamoDbConverter = dynamoDbConverter;
+	}
+
+	private static void rejectStronglyConsistentIndexRead(@Nullable String indexName,
+			@Nullable Boolean consistentRead) {
+		if (StringUtils.hasText(indexName) && Boolean.TRUE.equals(consistentRead)) {
+			throw new InvalidDataAccessApiUsageException("DynamoDB global secondary indexes support only eventually "
+					+ "consistent reads; consistentRead=true cannot be used with index '" + indexName + "'.");
+		}
 	}
 
 	private static void rejectIfSecondaryIndexView(DynamoDbPersistentEntity<?> entity, String operation) {
@@ -62,7 +71,6 @@ public class StatementFactory {
 
 		Map<String, AttributeValue> object = new LinkedHashMap<>();
 		dynamoDbConverter.write(objectToInsert, object, persistentEntity);
-		dynamoDbConverter.stampDiscriminator(object, persistentEntity);
 		PutItemRequest.Builder builder = PutItemRequest.builder().item(object).tableName(tableName);
 		if (dynamoDBConditionRequest.getConditionExpression() != null) {
 			builder.conditionExpression(dynamoDBConditionRequest.getConditionExpression());
@@ -90,7 +98,6 @@ public class StatementFactory {
 
 		Map<String, AttributeValue> object = new LinkedHashMap<>();
 		dynamoDbConverter.write(objectToInsert, object, persistentEntity);
-		dynamoDbConverter.stampDiscriminator(object, persistentEntity);
 
 		return PutRequest.builder().item(object).build();
 	}
@@ -282,6 +289,7 @@ public class StatementFactory {
 		if (StringUtils.hasText(qr.getIndexName())) {
 			indexName = qr.getIndexName();
 		}
+		rejectStronglyConsistentIndexRead(indexName, qr.getConsistentRead());
 
 		QueryRequest.Builder queryRequestBuilder = QueryRequest.builder().select(Select.ALL_ATTRIBUTES);
 		if (dynamoDBPageRequest != null) {
@@ -359,6 +367,7 @@ public class StatementFactory {
 
 	public ScanRequest scan(String tableName, DynamoDbScanRequest request, DynamoDbPersistentEntity<?> entity) {
 		var builder = ScanRequest.builder();
+		rejectStronglyConsistentIndexRead(request.getIndexName(), request.isConsistentRead());
 		builder.consistentRead(request.isConsistentRead());
 		builder.tableName(tableName);
 		if (request.getIndexName() != null) {

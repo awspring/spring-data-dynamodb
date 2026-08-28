@@ -18,11 +18,14 @@ package io.awspring.spring.data.dynamodb.core.mapping.events;
 import org.springframework.data.mapping.callback.EntityCallback;
 
 /**
+ * Invoked after before-convert callbacks and before a save write.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 @FunctionalInterface
 public interface DynamoDbBeforeSaveCallback<T> extends EntityCallback<T> {
 
+	/** @return the entity to convert and write */
 	T onBeforeSave(T entity, String tableName);
 }

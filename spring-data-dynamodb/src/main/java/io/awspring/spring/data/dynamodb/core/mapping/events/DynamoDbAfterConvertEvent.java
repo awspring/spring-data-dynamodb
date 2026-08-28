@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core.mapping.events;
 
 /**
+ * Published after a read item is converted and after its callback runs.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

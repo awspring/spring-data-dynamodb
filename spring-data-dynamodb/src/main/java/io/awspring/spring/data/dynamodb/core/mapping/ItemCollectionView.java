@@ -23,6 +23,8 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
+ * Defines a read-only view that folds related DynamoDB items into one object.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -30,13 +32,25 @@ import java.lang.annotation.Target;
 @Inherited
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
-public @interface AggregateTable {
+public @interface ItemCollectionView {
 
+	/**
+	 * @return the physical table name
+	 */
 	String tableName() default "";
 
+	/**
+	 * @return the secondary index name, or empty for the base table
+	 */
 	String indexName() default "";
 
+	/**
+	 * @return the physical partition-key attribute
+	 */
 	String partitionKey();
 
+	/**
+	 * @return the physical sort-key attribute, or empty for tables without one
+	 */
 	String sortKey() default "";
 }

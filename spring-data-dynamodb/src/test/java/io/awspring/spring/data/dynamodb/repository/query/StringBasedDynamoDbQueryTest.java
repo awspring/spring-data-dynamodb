@@ -25,12 +25,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
+import io.awspring.spring.data.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
+import io.awspring.spring.data.dynamodb.repository.AllowScan;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.DynamoDbRepositoryFactory;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Properties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -40,6 +47,7 @@ import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
+import org.springframework.data.repository.core.support.PropertiesBasedNamedQueries;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
@@ -60,6 +68,50 @@ class StringBasedDynamoDbQueryTest {
 		@SortKey
 		String sk;
 		String round;
+	}
+
+	@SecondaryIndex(name = INDEX_NAME, tableName = TABLE_NAME)
+	static class WidgetStatusIndex {
+		@PartitionKey
+		String status;
+		@SortKey
+		String pk;
+	}
+
+	interface WidgetStatusIndexRepository extends SecondaryIndexRepository<WidgetStatusIndex> {
+
+		@Query(filterExpression = "status = :status", allowScan = true)
+		List<WidgetStatusIndex> scanByStatus(@Param("status") String status);
+	}
+
+	interface ConsistentWidgetStatusIndexRepository extends SecondaryIndexRepository<WidgetStatusIndex> {
+
+		@Query(keyConditionExpression = "status = :status", consistentRead = true)
+		List<WidgetStatusIndex> stronglyConsistentByStatus(@Param("status") String status);
+	}
+
+	interface UpdatingWidgetStatusIndexRepository extends SecondaryIndexRepository<WidgetStatusIndex> {
+
+		@Update(updateExpression = "SET #status = :status", names = @ExpressionName(name = "#status", value = "status"))
+		void changeStatus(@Param("status") String status);
+	}
+
+	interface NamedScanRepository extends Repository<Widget, String> {
+
+		@AllowScan
+		@Query(limit = 3, names = @ExpressionName(name = "#statusAlias", value = "round"))
+		List<Widget> findNamedRound(@Param("round") String round);
+	}
+
+	interface UnsafeNamedScanRepository extends Repository<Widget, String> {
+
+		List<Widget> findByRound(String round);
+	}
+
+	interface NamedUpdateRepository extends Repository<Widget, String> {
+
+		@Update(updateExpression = "SET #round = :round")
+		void findByRound(String round);
 	}
 
 	interface WidgetRepository extends Repository<Widget, String> {
@@ -86,8 +138,12 @@ class StringBasedDynamoDbQueryTest {
 	}
 
 	private PartTreeDynamoDbQueryReplayTest.CapturingOperations operations() {
+		return operations(Widget.class);
+	}
+
+	private PartTreeDynamoDbQueryReplayTest.CapturingOperations operations(Class<?> entityType) {
 		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
-		mappingContext.getRequiredPersistentEntity(Widget.class);
+		mappingContext.getRequiredPersistentEntity(entityType);
 		MappingDynamoDbConverter converter = new MappingDynamoDbConverter(mappingContext);
 		converter.afterPropertiesSet();
 		return new PartTreeDynamoDbQueryReplayTest.CapturingOperations(converter);
@@ -151,6 +207,29 @@ class StringBasedDynamoDbQueryTest {
 		}
 
 		@Test
+		@DisplayName("named query combined with @Update is rejected at bootstrap")
+		void namedQueryCombinedWithUpdateIsRejectedAtBootstrap() {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+			Properties properties = new Properties();
+			properties.setProperty("Widget.findByRound", "round = :round");
+			factory.setNamedQueries(new PropertiesBasedNamedQueries(properties));
+
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> factory.getRepository(NamedUpdateRepository.class));
+		}
+
+		@Test
+		@DisplayName("@Update on a secondary-index repository is rejected at bootstrap")
+		void updateOnSecondaryIndexRepositoryIsRejectedAtBootstrap() {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations(WidgetStatusIndex.class);
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> factory.getRepository(UpdatingWidgetStatusIndexRepository.class));
+		}
+
+		@Test
 		@DisplayName("@Query(indexName=...) on a base DynamoDbRepository is rejected at bootstrap")
 		void indexNameOnBaseRepositoryRejectedAtBootstrap() throws NoSuchMethodException {
 			interface WidgetCrudRepository extends DynamoDbRepository<Widget,String>{@Query(keyConditionExpression="pk = :pk",indexName=INDEX_NAME)List<Widget>byIndex(@Param("pk")String pk);}
@@ -169,6 +248,66 @@ class StringBasedDynamoDbQueryTest {
 	@Nested
 	@DisplayName("Scan path (filter expression only)")
 	class ScanPathTests {
+
+		@Test
+		@DisplayName("named scan retains aliases and limit metadata")
+		void namedScanRetainsAliasesAndLimitMetadata() {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+			Properties properties = new Properties();
+			properties.setProperty("Widget.findNamedRound", "#statusAlias = :round");
+			factory.setNamedQueries(new PropertiesBasedNamedQueries(properties));
+			NamedScanRepository repository = factory.getRepository(NamedScanRepository.class);
+
+			repository.findNamedRound(ROUND_ACTIVE);
+
+			assertAll(
+					() -> assertEquals("#statusAlias = :round",
+							operations.lastCapturedScanRequest.getFilterExpression()),
+					() -> assertEquals("round",
+							operations.lastCapturedScanRequest.getExpressionAttributeNames().get("#statusAlias")),
+					() -> assertEquals(3, operations.lastCapturedScanRequest.getLimit()));
+		}
+
+		@Test
+		@DisplayName("named scan without @AllowScan is rejected at bootstrap")
+		void namedScanWithoutAllowScanIsRejectedAtBootstrap() {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+			Properties properties = new Properties();
+			properties.setProperty("Widget.findByRound", "round = :round");
+			factory.setNamedQueries(new PropertiesBasedNamedQueries(properties));
+
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> factory.getRepository(UnsafeNamedScanRepository.class));
+		}
+
+		@Test
+		@DisplayName("filter-only query on a secondary-index repository scans that index")
+		void filterOnlyQueryOnSecondaryIndexRepositoryScansThatIndex() {
+			// Arrange
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations(WidgetStatusIndex.class);
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+			WidgetStatusIndexRepository repository = factory.getRepository(WidgetStatusIndexRepository.class);
+
+			// Act
+			repository.scanByStatus(ROUND_ACTIVE);
+
+			// Assert
+			assertAll(() -> assertNotNull(operations.lastCapturedScanRequest),
+					() -> assertEquals(INDEX_NAME, operations.lastCapturedScanRequest.getIndexName()),
+					() -> assertEquals("status = :status", operations.lastCapturedScanRequest.getFilterExpression()));
+		}
+
+		@Test
+		@DisplayName("consistentRead on a secondary-index view is rejected at bootstrap")
+		void consistentReadOnSecondaryIndexViewIsRejectedAtBootstrap() {
+			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations(WidgetStatusIndex.class);
+			DynamoDbRepositoryFactory factory = new DynamoDbRepositoryFactory(operations);
+
+			assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> factory.getRepository(ConsistentWidgetStatusIndexRepository.class));
+		}
 
 		@Test
 		@DisplayName("filterExpression only produces a scan with a resolvable filter")

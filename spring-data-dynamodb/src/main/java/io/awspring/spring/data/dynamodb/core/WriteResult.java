@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core;
 
 /**
+ * Base result for a successful DynamoDB write.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

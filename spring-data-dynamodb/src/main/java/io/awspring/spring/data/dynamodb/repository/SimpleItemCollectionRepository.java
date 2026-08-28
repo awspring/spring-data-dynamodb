@@ -32,30 +32,32 @@ import org.springframework.util.StringUtils;
  * @author Matej Nedic
  * @since 1.0.0
  */
-public class SimpleAggregateRepository<A> implements AggregateRepository<A> {
+public class SimpleItemCollectionRepository<A> implements ItemCollectionRepository<A> {
 
 	private final DynamoDbOperations operations;
 
-	private final Class<A> aggregateType;
+	private final Class<A> viewType;
 
 	private final String partitionKeyColumn;
 
 	@Nullable
 	private final String sortKeyColumn;
 
-	public SimpleAggregateRepository(DynamoDbEntityInformation<A, ?> entityInformation, DynamoDbOperations operations) {
+	public SimpleItemCollectionRepository(DynamoDbEntityInformation<A, ?> entityInformation,
+			DynamoDbOperations operations) {
 		Assert.notNull(entityInformation, "entityInformation must not be null");
 		Assert.notNull(operations, "operations must not be null");
 
 		this.operations = operations;
-		this.aggregateType = entityInformation.getJavaType();
+		this.viewType = entityInformation.getJavaType();
 
 		DynamoDbPersistentEntity<?> entity = operations.getConverter().getMappingContext()
-				.getRequiredPersistentEntity(this.aggregateType);
-		Assert.state(entity.isAggregateView(), () -> this.aggregateType.getName() + " is not an @AggregateTable class");
+				.getRequiredPersistentEntity(this.viewType);
+		Assert.state(entity.isItemCollectionView(),
+				() -> this.viewType.getName() + " is not an @ItemCollectionView class");
 
-		this.partitionKeyColumn = entity.getAggregatePartitionKeyColumn();
-		this.sortKeyColumn = entity.getAggregateSortKeyColumn();
+		this.partitionKeyColumn = entity.getItemCollectionPartitionKeyColumn();
+		this.sortKeyColumn = entity.getItemCollectionSortKeyColumn();
 	}
 
 	@Override
@@ -89,7 +91,7 @@ public class SimpleAggregateRepository<A> implements AggregateRepository<A> {
 	@Override
 	public boolean existsByPartitionKey(Object partitionKey) {
 		Assert.notNull(partitionKey, "partitionKey must not be null");
-		return findByPartitionKey(partitionKey).isPresent();
+		return operations.exists(viewType, buildRequest(partitionKey, null, Map.of()));
 	}
 
 	private DynamoDbQueryRequest buildRequest(Object partitionKey, @Nullable String sortCondition,
@@ -103,7 +105,7 @@ public class SimpleAggregateRepository<A> implements AggregateRepository<A> {
 		String keyConditionExpression = "#pk = :pk";
 		if (sortCondition != null) {
 			Assert.state(StringUtils.hasText(this.sortKeyColumn),
-					() -> this.aggregateType.getName() + " has no @AggregateTable.sortKey() to bind a sort-key "
+					() -> this.viewType.getName() + " has no @ItemCollectionView.sortKey() to bind a sort-key "
 							+ "condition to; a sort-key query method requires a resolvable sort-key column");
 			names.put("#sk", this.sortKeyColumn);
 			keyConditionExpression = keyConditionExpression + " AND " + sortCondition;
@@ -115,7 +117,7 @@ public class SimpleAggregateRepository<A> implements AggregateRepository<A> {
 	}
 
 	private Optional<A> queryPartition(DynamoDbQueryRequest request) {
-		EntityQueryResult<A> result = operations.queryAggregate(aggregateType, request, DynamoDbPageRequest.of(null));
+		EntityQueryResult<A> result = operations.queryItemCollection(viewType, request, DynamoDbPageRequest.of(null));
 		if (result == null) {
 			return Optional.empty();
 		}

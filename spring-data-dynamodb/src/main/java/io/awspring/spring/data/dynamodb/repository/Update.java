@@ -13,30 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.spring.data.dynamodb.core.mapping;
+package io.awspring.spring.data.dynamodb.repository;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
-import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import org.springframework.data.annotation.QueryAnnotation;
 
 /**
+ * Declares a single-item DynamoDB update.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
-@Documented
-@Inherited
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.FIELD)
-public @interface AggregateItem {
+@Target(ElementType.METHOD)
+@Documented
+@QueryAnnotation
+public @interface Update {
 
-	String startsWith() default "";
+	/** @return the DynamoDB update expression */
+	String updateExpression();
 
-	String endsWith() default "";
+	/** @return the optional DynamoDB condition expression */
+	String conditionExpression() default "";
 
-	String regex() default "";
+	/** @return expression attribute-name mappings */
+	ExpressionName[] names() default {};
 
-	String sortKey() default "";
+	/** @return constant expression attribute values */
+	ExpressionValue[] values() default {};
 }

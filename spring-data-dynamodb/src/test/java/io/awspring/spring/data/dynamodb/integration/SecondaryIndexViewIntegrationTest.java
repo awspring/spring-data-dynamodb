@@ -17,6 +17,7 @@ package io.awspring.spring.data.dynamodb.integration;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -30,10 +31,14 @@ import io.awspring.spring.data.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,11 +50,16 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.ScrollPosition;
+import org.springframework.data.domain.Window;
+import org.springframework.data.repository.query.Param;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.CreateGlobalSecondaryIndexAction;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndex;
@@ -228,6 +238,11 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 
 	public interface PlayerInTournamentViewRepository extends SecondaryIndexRepository<PlayerInTournamentView> {
 		List<PlayerInTournamentView> findByCollectionKey(String collectionKey);
+
+		Window<PlayerInTournamentView> findByCollectionKey(String collectionKey, ScrollPosition position, Limit limit);
+
+		@Query(filterExpression = "#name = :name", names = @ExpressionName(name = "#name", value = "name"), allowScan = true)
+		List<PlayerInTournamentView> findByPlayerName(@Param("name") String name);
 	}
 
 	@SecondaryIndex(name = REGION_LSI, tableName = TABLE_NAME)
@@ -404,8 +419,8 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 	}
 
 	@Nested
-	@DisplayName("GSI polymorphic view")
-	class GsiPolymorphicView {
+	@DisplayName("GSI heterogeneous rows")
+	class GsiHeterogeneousRows {
 
 		@Test
 		@DisplayName("GSI view reconstructs player and match rows by overloaded sort-key prefix")
@@ -427,13 +442,54 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 		}
 
 		@Test
-		@DisplayName("base table reconstructs all four polymorphic kinds with no type attribute")
+		@DisplayName("filter-only query scans the declared GSI rather than the base table")
+		void findByPlayerName_filterOnly_scansGsi() {
+			seedArena();
+			dynamoDbClient.putItem(builder -> builder.tableName(TABLE_NAME)
+					.item(Map.of("pk", AttributeValue.builder().s("BASE#ONLY").build(), "sk",
+							AttributeValue.builder().s("PLAYER#base-only").build(), "name",
+							AttributeValue.builder().s(PLAYER_NAME).build())));
+
+			List<PlayerInTournamentView> found = gsi1Repository.findByPlayerName(PLAYER_NAME);
+
+			assertAll("GSI scan excludes the matching sparse base-table row", () -> assertEquals(1, found.size()),
+					() -> assertEquals("PT#" + TOURNAMENT_ID + "#" + PLAYER_ID, found.get(0).getCollectionKey()),
+					() -> assertEquals(PLAYER_NAME, found.get(0).getPlayer().getName()));
+		}
+
+		@Test
+		@DisplayName("Window pagination resumes across every GSI row without duplicates")
+		void findByCollectionKey_window_pagesAcrossGsi() {
+			seedArena();
+			String collectionKey = "PT#" + TOURNAMENT_ID + "#" + PLAYER_ID;
+			List<String> itemKeys = new ArrayList<>();
+			ScrollPosition position = ScrollPosition.keyset();
+			int pages = 0;
+			Window<PlayerInTournamentView> window;
+
+			do {
+				window = gsi1Repository.findByCollectionKey(collectionKey, position, Limit.of(1));
+				window.forEach(row -> itemKeys.add(row.getItemKey()));
+				pages++;
+				if (window.hasNext()) {
+					position = window.positionAt(window.getContent().size() - 1);
+				}
+			}
+			while (window.hasNext() && pages < 10);
+
+			assertEquals(List.of("MATCH#m1", "MATCH#m2", "PLAYER#p1"), itemKeys,
+					"every GSI row must be returned once in index sort-key order");
+			assertFalse(window.hasNext(), "the terminal Window must be exhausted");
+		}
+
+		@Test
+		@DisplayName("base table reconstructs all four heterogeneous row shapes with no type attribute")
 		void findByPk_allKinds_reconstructsEach() {
 			seedArena();
 
 			List<ArenaItem> items = baseRepository.findByPk(TOURNAMENT_PK);
 
-			assertAll("all polymorphic kinds present", () -> assertEquals(5, items.size()),
+			assertAll("all heterogeneous row shapes present", () -> assertEquals(5, items.size()),
 					() -> assertEquals(1, items.stream().filter(i -> i.tournament != null).count()),
 					() -> assertEquals(1, items.stream().filter(i -> i.player != null).count()),
 					() -> assertEquals(2, items.stream().filter(i -> i.match != null).count()),

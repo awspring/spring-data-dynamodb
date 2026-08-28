@@ -15,31 +15,31 @@
  */
 package io.awspring.spring.data.dynamodb.entities.arena;
 
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import java.util.List;
 
-@AggregateTable(tableName = "arena", partitionKey = "partitionKey", sortKey = "sortKey")
-public class MatchAggregate {
+@ItemCollectionView(tableName = "arena", partitionKey = "partitionKey", sortKey = "sortKey")
+public class MatchItemCollection {
 
-	@AggregateItem(startsWith = "MATCH")
-	private List<MatchSkAggregate> match;
-	@AggregateItem(startsWith = "PLAYER")
-	private PlayerContactAggregate playerContact;
+	@ItemCollectionMember(startsWith = "MATCH")
+	private List<MatchItemCollectionRow> match;
+	@ItemCollectionMember(startsWith = "PLAYER")
+	private PlayerContactItemCollectionRow playerContact;
 
-	public List<MatchSkAggregate> getMatch() {
+	public List<MatchItemCollectionRow> getMatch() {
 		return match;
 	}
 
-	public void setMatch(List<MatchSkAggregate> match) {
+	public void setMatch(List<MatchItemCollectionRow> match) {
 		this.match = match;
 	}
 
-	public PlayerContactAggregate getPlayerContact() {
+	public PlayerContactItemCollectionRow getPlayerContact() {
 		return playerContact;
 	}
 
-	public void setPlayerContact(PlayerContactAggregate playerContact) {
+	public void setPlayerContact(PlayerContactItemCollectionRow playerContact) {
 		this.playerContact = playerContact;
 	}
 }

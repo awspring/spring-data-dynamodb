@@ -32,7 +32,7 @@ import org.springframework.util.StringUtils;
 public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentProperty {
 
 	private final boolean isEmbedded;
-	private Class typeOfProperty;
+	private Class<?> typeOfProperty;
 
 	private String startsWith;
 
@@ -50,29 +50,35 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 		this.isEmbedded = super.isEntity();
 
 		if (isEmbedded) {
-			try {
-				Type ty = property.getField().get().getGenericType();
-				if (ty instanceof ParameterizedType) {
-					Type t = ((ParameterizedType) ty).getActualTypeArguments()[0];
-					this.typeOfProperty = Class.forName(((Class) t).getName());
-				}
-				else if (property.getField().get().isAnnotationPresent(InnerClass.class)) {
-					InnerClass innerClass = property.getField().get().getAnnotation(InnerClass.class);
-					startsWith = innerClass.startsWith();
-					endsWith = innerClass.endsWith();
-					regexPattern = compile(innerClass.regex(), property);
-					serializeAsNestedMap = innerClass.serializeAsNestedMap();
-					this.typeOfProperty = Class.forName(((Class) ty).getName());
-					this.isSpecialType = true;
-				}
+			Type ty = property.getField().get().getGenericType();
+			if (ty instanceof ParameterizedType parameterizedType) {
+				Type typeArgument = parameterizedType.getActualTypeArguments()[0];
+				this.typeOfProperty = resolveClass(typeArgument, property);
 			}
-			catch (ReflectiveOperationException e) {
-				throw new MappingException("Cannot resolve type information for embedded property " + property, e);
+			else if (property.getField().get().isAnnotationPresent(InnerClass.class)) {
+				InnerClass innerClass = property.getField().get().getAnnotation(InnerClass.class);
+				startsWith = innerClass.startsWith();
+				endsWith = innerClass.endsWith();
+				regexPattern = compile(innerClass.regex(), property);
+				serializeAsNestedMap = innerClass.serializeAsNestedMap();
+				this.typeOfProperty = resolveClass(ty, property);
+				this.isSpecialType = true;
 			}
 		}
 		else {
 			typeOfProperty = null;
 		}
+	}
+
+	private static Class<?> resolveClass(Type type, Property property) {
+		if (type instanceof Class<?> resolvedClass) {
+			return resolvedClass;
+		}
+		if (type instanceof ParameterizedType parameterizedType
+				&& parameterizedType.getRawType() instanceof Class<?> resolvedClass) {
+			return resolvedClass;
+		}
+		throw new MappingException("Cannot resolve the mapped type of " + property + " from " + type.getTypeName());
 	}
 
 	@Nullable
@@ -106,12 +112,7 @@ public class CachingDynamoDbPersistentProperty extends BasicDynamoDbPersistentPr
 	}
 
 	@Override
-	public boolean isEmbedded() {
-		return isEmbedded;
-	}
-
-	@Override
-	public Class getTypeOfProperty() {
+	public Class<?> getTypeOfProperty() {
 		return typeOfProperty;
 	}
 

@@ -18,6 +18,8 @@ package io.awspring.spring.data.dynamodb.request;
 import java.util.Map;
 
 /**
+ * Options for a low-level DynamoDB {@code Scan} request.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

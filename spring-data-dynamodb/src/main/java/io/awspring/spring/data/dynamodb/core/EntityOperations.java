@@ -199,7 +199,6 @@ public class EntityOperations {
 
 			DynamoDbPersistentProperty versionProperty = this.entity.getRequiredVersionProperty();
 
-			// A primitive version property cannot hold null; fall back to its zero sentinel.
 			Object value = (version == null && versionProperty.getType().isPrimitive()) ? 0 : version;
 			this.propertyAccessor.setProperty(versionProperty, value);
 		}

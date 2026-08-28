@@ -15,9 +15,8 @@
  */
 package io.awspring.spring.data.examples.config;
 
-import java.net.URI;
-
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
+import java.net.URI;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;

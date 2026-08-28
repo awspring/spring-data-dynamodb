@@ -38,20 +38,19 @@ public class BasicDynamoDbPersistentEntityMetadataVerifier implements DynamoDbPe
 
 		boolean hasTable = entity.isAnnotationPresent(Table.class);
 		boolean isView = entity.isSecondaryIndexView();
-		boolean isAggregate = entity.isAggregateView();
+		boolean itemCollectionView = entity.isItemCollectionView();
 
-		int categories = (hasTable ? 1 : 0) + (isView ? 1 : 0) + (isAggregate ? 1 : 0);
+		int categories = (hasTable ? 1 : 0) + (isView ? 1 : 0) + (itemCollectionView ? 1 : 0);
 		if (categories > 1) {
-			throw new VerifierMappingExceptions(entity,
-					List.of(new MappingException(String.format(
-							"%s declares more than one of @Table, @SecondaryIndex and @AggregateTable; a class must be "
-									+ "exactly one of: a base-table entity, a read-only secondary-index view, or a "
-									+ "read-only aggregate fold",
-							entity.getType().getName()))));
+			throw new VerifierMappingExceptions(entity, List.of(new MappingException(String.format(
+					"%s declares more than one of @Table, @SecondaryIndex and @ItemCollectionView; a class must be "
+							+ "exactly one of: a base-table entity, a read-only secondary-index view, or a "
+							+ "read-only item-collection view",
+					entity.getType().getName()))));
 		}
 
-		if (isAggregate) {
-			verifyAggregate(entity);
+		if (itemCollectionView) {
+			verifyItemCollectionView(entity);
 			return;
 		}
 
@@ -118,46 +117,46 @@ public class BasicDynamoDbPersistentEntityMetadataVerifier implements DynamoDbPe
 		}
 	}
 
-	private static void verifyAggregate(DynamoDbPersistentEntity<?> entity) {
+	private static void verifyItemCollectionView(DynamoDbPersistentEntity<?> entity) {
 		List<MappingException> exceptions = new ArrayList<>();
 
-		AggregateTable annotation = entity.findAnnotation(AggregateTable.class);
+		ItemCollectionView annotation = entity.findAnnotation(ItemCollectionView.class);
 		if (annotation == null) {
 			return;
 		}
 
 		if (!StringUtils.hasText(annotation.tableName())) {
 			exceptions.add(new MappingException(
-					String.format("%s @AggregateTable.tableName() must not be blank", entity.getType().getName())));
+					String.format("%s @ItemCollectionView.tableName() must not be blank", entity.getType().getName())));
 		}
 		if (!StringUtils.hasText(annotation.partitionKey())) {
-			exceptions.add(new MappingException(
-					String.format("%s @AggregateTable.partitionKey() must not be blank", entity.getType().getName())));
+			exceptions.add(new MappingException(String.format("%s @ItemCollectionView.partitionKey() must not be blank",
+					entity.getType().getName())));
 		}
 
 		boolean gsiScoped = StringUtils.hasText(annotation.indexName());
-		boolean aggregateSortKeyBlank = !StringUtils.hasText(annotation.sortKey());
-		if (aggregateSortKeyBlank && !gsiScoped) {
+		boolean viewSortKeyBlank = !StringUtils.hasText(annotation.sortKey());
+		if (viewSortKeyBlank && !gsiScoped) {
 			exceptions.add(new MappingException(String.format(
-					"%s @AggregateTable.sortKey() must not be blank for a base-table aggregate; DynamoDB only lets "
+					"%s @ItemCollectionView.sortKey() must not be blank for a base-table item-collection view; DynamoDB only lets "
 							+ "multiple items share a partition key via a composite (partition key + sort key) primary "
-							+ "key, so a base-table aggregate requires a sort-key attribute",
+							+ "key, so a base-table item-collection view requires a sort-key attribute",
 					entity.getType().getName())));
 		}
 
 		int childrenCount = 0;
 		for (DynamoDbPersistentProperty property : entity) {
-			if (!property.isAggregateItem()) {
+			if (!property.isItemCollectionMember()) {
 				continue;
 			}
 			childrenCount++;
 
-			if (aggregateSortKeyBlank && gsiScoped) {
-				AggregateItem memberRule = property.getAggregateItem();
+			if (viewSortKeyBlank && gsiScoped) {
+				ItemCollectionMember memberRule = property.getItemCollectionMember();
 				if (memberRule == null || !StringUtils.hasText(memberRule.sortKey())) {
 					exceptions.add(new MappingException(String.format(
-							"%s.%s must declare its own @AggregateItem.sortKey(); when a GSI-scoped @AggregateTable "
-									+ "leaves sortKey() blank, every @AggregateItem must name the column it reads its "
+							"%s.%s must declare its own @ItemCollectionMember.sortKey(); when a GSI-scoped @ItemCollectionView "
+									+ "leaves sortKey() blank, every @ItemCollectionMember must name the column it reads its "
 									+ "routing value from",
 							entity.getType().getName(), property.getName())));
 				}
@@ -168,27 +167,27 @@ public class BasicDynamoDbPersistentEntityMetadataVerifier implements DynamoDbPe
 					: null) : property.getType();
 
 			if (rowType == null) {
-				exceptions.add(new MappingException(
-						String.format("%s.%s is annotated @AggregateItem but its List has no resolvable element type",
-								entity.getType().getName(), property.getName())));
+				exceptions.add(new MappingException(String.format(
+						"%s.%s is annotated @ItemCollectionMember but its List has no resolvable element type",
+						entity.getType().getName(), property.getName())));
 				continue;
 			}
 
-			AggregateItem rule = property.getAggregateItem();
+			ItemCollectionMember rule = property.getItemCollectionMember();
 			boolean routed = rule != null && (StringUtils.hasText(rule.regex())
 					|| StringUtils.hasText(rule.startsWith()) || StringUtils.hasText(rule.endsWith()));
 			if (!routed) {
 				exceptions.add(new MappingException(String.format(
-						"%s.%s is annotated @AggregateItem but declares none of startsWith/endsWith/regex; an "
-								+ "aggregate member must declare a routing pattern",
+						"%s.%s is annotated @ItemCollectionMember but declares none of startsWith/endsWith/regex; an "
+								+ "item-collection member must declare a routing pattern",
 						entity.getType().getName(), property.getName())));
 			}
 		}
 
 		if (childrenCount == 0) {
-			exceptions.add(new MappingException(
-					String.format("%s is an @AggregateTable and must declare at least one @AggregateItem member",
-							entity.getType().getName())));
+			exceptions.add(new MappingException(String.format(
+					"%s is an @ItemCollectionView and must declare at least one @ItemCollectionMember member",
+					entity.getType().getName())));
 		}
 
 		if (!exceptions.isEmpty()) {

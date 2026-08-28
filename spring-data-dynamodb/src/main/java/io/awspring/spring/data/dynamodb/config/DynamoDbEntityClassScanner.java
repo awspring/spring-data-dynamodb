@@ -15,7 +15,7 @@
  */
 package io.awspring.spring.data.dynamodb.config;
 
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.SecondaryIndex;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import java.lang.annotation.Annotation;
@@ -138,6 +138,6 @@ public class DynamoDbEntityClassScanner {
 
 	@SuppressWarnings("unchecked")
 	protected Class<? extends Annotation>[] getEntityAnnotations() {
-		return new Class[] { Table.class, SecondaryIndex.class, AggregateTable.class };
+		return new Class[] { Table.class, SecondaryIndex.class, ItemCollectionView.class };
 	}
 }

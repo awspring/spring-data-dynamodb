@@ -17,17 +17,35 @@ package io.awspring.spring.data.dynamodb.core.mapping;
 
 import java.lang.annotation.*;
 
+/**
+ * Maps an embedded property selected by sort-key patterns.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Inherited
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ ElementType.FIELD })
 public @interface InnerClass {
 
+	/**
+	 * @return the required sort-key prefix
+	 */
 	String startsWith() default "";
 
+	/**
+	 * @return the required sort-key suffix
+	 */
 	String endsWith() default "";
 
+	/**
+	 * @return the regular expression matched against the complete sort key
+	 */
 	String regex() default "";
 
+	/**
+	 * @return whether the property is stored as a DynamoDB map
+	 */
 	boolean serializeAsNestedMap() default false;
 }

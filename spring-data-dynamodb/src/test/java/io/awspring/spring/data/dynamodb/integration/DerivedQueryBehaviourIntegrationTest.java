@@ -18,6 +18,7 @@ package io.awspring.spring.data.dynamodb.integration;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
@@ -27,6 +28,8 @@ import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +42,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.repository.query.Param;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -155,6 +160,15 @@ public class DerivedQueryBehaviourIntegrationTest extends LocalStackTestContaine
 		boolean existsBySensor(String sensor);
 
 		boolean existsBySensorAndMinuteGreaterThan(String sensor, Long minute);
+
+		@Update(updateExpression = "SET #label = :label", names = @ExpressionName(name = "#label", value = "label"))
+		Reading changeLabel(@Param("sensor") String sensor, @Param("minute") Long minute, @Param("label") String label);
+
+		@Update(updateExpression = "SET #label = :label", conditionExpression = "#region = :expectedRegion", names = {
+				@ExpressionName(name = "#label", value = "label"),
+				@ExpressionName(name = "#region", value = "region") })
+		Reading changeLabelWhenRegion(@Param("sensor") String sensor, @Param("minute") Long minute,
+				@Param("label") String label, @Param("expectedRegion") String expectedRegion);
 	}
 
 	@EnableDynamoDbRepositories(basePackageClasses = DerivedQueryBehaviourIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!DerivedQueryBehaviourIntegrationTest\\$).*"))
@@ -368,6 +382,36 @@ public class DerivedQueryBehaviourIntegrationTest extends LocalStackTestContaine
 			assertEquals(List.of(2L, 3L, 4L), minutesOf(found),
 					"a filter-expression BETWEEN must keep both bounds in separate value slots; sharing one slot "
 							+ "collapses the range to an equality check on the upper bound and would return only minute 4");
+		}
+	}
+
+	@Nested
+	@DisplayName("Update queries")
+	class UpdateQueries {
+
+		@Test
+		@DisplayName("@Update update persists and returns the updated entity")
+		void updateQuery_updateExpression_persistsChange() {
+			Reading updated = repository.changeLabel(SENSOR_A, 1L, "updated-label");
+			Reading persisted = repository.findBySensorAndMinuteBetween(SENSOR_A, 1L, 1L).get(0);
+
+			assertAll("update expression", () -> assertEquals("updated-label", updated.getLabel()),
+					() -> assertEquals("updated-label", persisted.getLabel()),
+					() -> assertEquals(SENSOR_A, persisted.getSensor()), () -> assertEquals(1L, persisted.getMinute()));
+		}
+
+		@Test
+		@DisplayName("conditionExpression applies an update only when the condition matches")
+		void updateQuery_conditionExpression_guardsUpdate() {
+			Reading updated = repository.changeLabelWhenRegion(SENSOR_A, 1L, "conditional-label", REGION_EU);
+
+			assertEquals("conditional-label", updated.getLabel());
+			assertThrows(ConcurrencyFailureException.class,
+					() -> repository.changeLabelWhenRegion(SENSOR_A, 1L, "rejected-label", REGION_US));
+
+			Reading persisted = repository.findBySensorAndMinuteBetween(SENSOR_A, 1L, 1L).get(0);
+			assertEquals("conditional-label", persisted.getLabel(),
+					"a failed condition must leave the previously accepted value unchanged");
 		}
 	}
 

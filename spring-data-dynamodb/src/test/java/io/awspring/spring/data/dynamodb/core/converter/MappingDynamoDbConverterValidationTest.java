@@ -45,16 +45,6 @@ class MappingDynamoDbConverterValidationTest {
 	}
 
 	@Test
-	void classLessReadReturnsNullForEmptySource() {
-		assertNull(converter.read(new HashMap<>()));
-	}
-
-	@Test
-	void classLessReadWithNullSourceFailsFast() {
-		assertThrows(IllegalArgumentException.class, () -> converter.read((Map<String, AttributeValue>) null));
-	}
-
-	@Test
 	void classAwareReadWithNullSourceFailsFast() {
 		assertThrows(IllegalArgumentException.class,
 				() -> converter.read(Player.class, (Map<String, AttributeValue>) null));

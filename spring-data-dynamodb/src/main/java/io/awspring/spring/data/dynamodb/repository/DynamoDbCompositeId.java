@@ -17,20 +17,23 @@ package io.awspring.spring.data.dynamodb.repository;
 
 import org.springframework.util.Assert;
 
-
 /**
+ * Repository ID containing both DynamoDB key values.
+ *
+ * @param partitionKey partition-key value
+ * @param sortKey sort-key value
  * @author Matej Nedic
  * @since 1.0.0
  */
-public record DynamoDbCompositeId(Object partitionKey, Object sortKey) {
+public record DynamoDbCompositeId<T, N>(T partitionKey, N sortKey) {
 
 	public DynamoDbCompositeId {
 		Assert.notNull(partitionKey, "partitionKey must not be null");
 		Assert.notNull(sortKey, "sortKey must not be null");
 	}
 
-
-	public static DynamoDbCompositeId of(Object partitionKey, Object sortKey) {
-		return new DynamoDbCompositeId(partitionKey, sortKey);
+	/** Creates a composite ID from both key values. */
+	public static <T, N> DynamoDbCompositeId<T, N> of(T partitionKey, N sortKey) {
+		return new DynamoDbCompositeId<>(partitionKey, sortKey);
 	}
 }

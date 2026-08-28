@@ -20,8 +20,8 @@ import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.spring.data.dynamodb.repository.query.DynamoDbQueryMethod;
 import io.awspring.spring.data.dynamodb.repository.query.PartTreeDynamoDbQuery;
-import io.awspring.spring.data.dynamodb.repository.query.StringBasedAggregateQuery;
 import io.awspring.spring.data.dynamodb.repository.query.StringBasedDynamoDbQuery;
+import io.awspring.spring.data.dynamodb.repository.query.StringBasedItemCollectionQuery;
 import io.awspring.spring.data.dynamodb.repository.support.DynamoDbEntityInformation;
 import io.awspring.spring.data.dynamodb.repository.support.MappingDynamoDbEntityInformation;
 import java.lang.reflect.Method;
@@ -73,7 +73,7 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	@Override
 	protected Object getTargetRepository(RepositoryInformation information) {
 		DynamoDbEntityInformation<?, Object> entityInformation = getEntityInformation(information.getDomainType(),
-				isSecondaryIndexView(information) || isAggregateRepository(information));
+				isSecondaryIndexView(information) || isItemCollectionRepository(information));
 		return getTargetRepositoryViaReflection(information, entityInformation, operations);
 	}
 
@@ -81,14 +81,14 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 		return SecondaryIndexRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
 	}
 
-	private static boolean isAggregateRepository(RepositoryMetadata metadata) {
-		return AggregateRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
+	private static boolean isItemCollectionRepository(RepositoryMetadata metadata) {
+		return ItemCollectionRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
 	}
 
 	@Override
 	protected Class<?> getRepositoryBaseClass(RepositoryMetadata metadata) {
-		if (isAggregateRepository(metadata)) {
-			return SimpleAggregateRepository.class;
+		if (isItemCollectionRepository(metadata)) {
+			return SimpleItemCollectionRepository.class;
 		}
 		return SimpleDynamoDbRepository.class;
 	}
@@ -96,43 +96,76 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	@Override
 	protected Optional<QueryLookupStrategy> getQueryLookupStrategy(@Nullable Key key,
 			ValueExpressionDelegate valueExpressionDelegate) {
+		Key lookupStrategyKey = key != null ? key : Key.CREATE_IF_NOT_FOUND;
 		return Optional.of(new DynamoDbQueryLookupStrategy(operations,
-				new CachingValueExpressionDelegate(valueExpressionDelegate), mappingContext));
+				new CachingValueExpressionDelegate(valueExpressionDelegate), mappingContext, lookupStrategyKey));
 	}
 
 	private record DynamoDbQueryLookupStrategy(DynamoDbOperations operations,
 			ValueExpressionDelegate valueExpressionDelegate,
-			MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext)
-			implements QueryLookupStrategy {
+			MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext,
+			Key lookupStrategyKey) implements QueryLookupStrategy {
 
 	@Override
 	public RepositoryQuery resolveQuery(Method method, RepositoryMetadata metadata, ProjectionFactory factory,
 			NamedQueries namedQueries) {
 
 		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, factory, mappingContext);
+		String namedQueryName = queryMethod.getNamedQueryName();
 
-		if (isAggregateRepository(metadata)) {
-			if (queryMethod.hasAnnotatedQuery()) {
-				return new StringBasedAggregateQuery(queryMethod, operations, valueExpressionDelegate);
+		boolean useDeclaredQueries = lookupStrategyKey != Key.CREATE;
+		if (queryMethod.isUpdateQuery()) {
+			if (useDeclaredQueries && namedQueries.hasQuery(namedQueryName)) {
+				throw new InvalidDataAccessApiUsageException(
+						"Named DynamoDB queries are read-only expressions and cannot be combined with @Update. "
+								+ "Remove the named query property for method: " + method);
 			}
+			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
+		}
+
+		if (useDeclaredQueries && namedQueries.hasQuery(namedQueryName)) {
+			String namedQueryString = namedQueries.getQuery(namedQueryName);
+			if (isItemCollectionRepository(metadata)) {
+				return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate,
+						namedQueryString);
+			}
+			verifyScanAllowed(queryMethod, method);
+			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate, namedQueryString);
+		}
+
+		if (useDeclaredQueries && queryMethod.hasAnnotatedQuery()) {
+			if (isItemCollectionRepository(metadata)) {
+				return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate);
+			}
+			Query query = queryMethod.getQueryAnnotation();
+			if (query != null && !queryMethod.isPartiQlQuery() && query.keyConditionExpression().isBlank()
+					&& !query.filterExpression().isBlank()) {
+				verifyScanAllowed(queryMethod, method);
+			}
+			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
+		}
+
+		if (lookupStrategyKey == Key.USE_DECLARED_QUERY) {
+			throw new InvalidDataAccessApiUsageException("No declared DynamoDB query found for " + method
+					+ ". Configure a named query, annotate the method with @Query or @Update, "
+					+ "or use CREATE_IF_NOT_FOUND to allow derived queries.");
+		}
+
+		if (isItemCollectionRepository(metadata)) {
 			throw new InvalidDataAccessApiUsageException(
-					"AggregateRepository does not support PartTree (derived) query methods; an aggregate class "
+					"ItemCollectionRepository does not support PartTree (derived) query methods; an item-collection view class "
 							+ "exposes no key properties to bind to. Use @Query(keyConditionExpression=...) or one "
 							+ "of the fixed base methods (findByPartitionKey, findByPartitionKeyAndSortKey, etc.). "
 							+ "Method: " + method);
 		}
 
-		String namedQueryName = queryMethod.getNamedQueryName();
-
-		if (namedQueries.hasQuery(namedQueryName)) {
-			String namedQueryString = namedQueries.getQuery(namedQueryName);
-			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate, namedQueryString);
-		}
-
-		if (queryMethod.hasAnnotatedQuery()) {
-			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
-		}
-
 		return new PartTreeDynamoDbQuery(queryMethod, operations);
+	}
+
+	private static void verifyScanAllowed(DynamoDbQueryMethod queryMethod, Method method) {
+		if (!queryMethod.allowsScan()) {
+			throw new InvalidDataAccessApiUsageException("Declared query method " + method
+					+ " requires a Scan but is not annotated @AllowScan and does not set @Query(allowScan=true).");
+		}
 	}
 }}

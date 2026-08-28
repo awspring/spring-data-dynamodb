@@ -15,11 +15,10 @@
  */
 package io.awspring.spring.data.examples.repository;
 
-import io.awspring.spring.data.examples.model.CustomerAccount;
-import java.util.List;
-
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.examples.model.CustomerAccount;
+import java.util.List;
 import org.springframework.stereotype.Repository;
 
 /**

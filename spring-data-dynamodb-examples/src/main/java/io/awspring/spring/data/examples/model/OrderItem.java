@@ -16,8 +16,9 @@
 package io.awspring.spring.data.examples.model;
 
 import io.awspring.spring.data.dynamodb.core.mapping.Column;
+import io.awspring.spring.data.dynamodb.core.mapping.Derived;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
-import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
+import io.awspring.spring.data.dynamodb.core.mapping.SortKeyTemplate;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import java.math.BigDecimal;
 
@@ -26,18 +27,19 @@ import java.math.BigDecimal;
  * @since 1.0.0
  */
 @Table(tableName = "Commerce")
+@SortKeyTemplate("ORDER#{orderId}#ITEM#{productId}")
 public class OrderItem {
 
 	@PartitionKey
 	private String pk;
 
-	@SortKey
 	private String sk;
 
 	private String customerId;
 
 	private String orderId;
 
+	@Derived
 	private String productId;
 
 	private String productName;

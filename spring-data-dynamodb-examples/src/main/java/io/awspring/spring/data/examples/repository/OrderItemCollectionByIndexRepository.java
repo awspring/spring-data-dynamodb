@@ -13,26 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.spring.data.dynamodb.repository;
+package io.awspring.spring.data.examples.repository;
 
-import java.util.Optional;
-import org.springframework.data.repository.NoRepositoryBean;
-import org.springframework.data.repository.Repository;
+import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
+import io.awspring.spring.data.examples.model.OrderItemCollectionByIndex;
+import org.springframework.stereotype.Repository;
 
 /**
  * @author Matej Nedic
  * @since 1.0.0
  */
-@NoRepositoryBean
-public interface AggregateRepository<A> extends Repository<A, Void> {
-
-	Optional<A> findByPartitionKey(Object partitionKey);
-
-	Optional<A> findByPartitionKeyAndSortKey(Object partitionKey, Object sortKey);
-
-	Optional<A> findByPartitionKeyAndSortKeyBetween(Object partitionKey, Object lo, Object hi);
-
-	Optional<A> findByPartitionKeyAndSortKeyStartingWith(Object partitionKey, String prefix);
-
-	boolean existsByPartitionKey(Object partitionKey);
+@Repository
+public interface OrderItemCollectionByIndexRepository extends ItemCollectionRepository<OrderItemCollectionByIndex> {
 }

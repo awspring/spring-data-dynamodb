@@ -26,6 +26,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.AllowScan;
+import io.awspring.spring.data.dynamodb.repository.DynamoDbRepositoryFactory;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Properties;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
@@ -41,7 +43,8 @@ import org.springframework.data.repository.core.NamedQueries;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.DefaultRepositoryMetadata;
 import org.springframework.data.repository.core.support.PropertiesBasedNamedQueries;
-import org.springframework.data.repository.query.CachingValueExpressionDelegate;
+import org.springframework.data.repository.query.QueryLookupStrategy;
+import org.springframework.data.repository.query.QueryLookupStrategy.Key;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
 
@@ -95,7 +98,22 @@ class NamedQueryResolutionTest {
 		when(converter.getMappingContext()).thenReturn((MappingContext) mappingContext);
 	}
 
+	private static final class TestDynamoDbRepositoryFactory extends DynamoDbRepositoryFactory {
+
+		private TestDynamoDbRepositoryFactory(DynamoDbOperations operations) {
+			super(operations);
+		}
+
+		private QueryLookupStrategy queryLookupStrategy(Key key) {
+			return getQueryLookupStrategy(key, ValueExpressionDelegate.create()).orElseThrow();
+		}
+	}
+
 	private RepositoryQuery resolveQuery(NamedQueries namedQueries) throws NoSuchMethodException {
+		return resolveQuery(namedQueries, Key.CREATE_IF_NOT_FOUND);
+	}
+
+	private RepositoryQuery resolveQuery(NamedQueries namedQueries, Key key) throws NoSuchMethodException {
 		RepositoryMetadata metadata = new DefaultRepositoryMetadata(TestRepository.class);
 		Method method = TestRepository.class.getMethod("findByNamedQuery", String.class);
 		ProjectionFactory projectionFactory = new SpelAwareProxyProjectionFactory();
@@ -106,25 +124,8 @@ class NamedQueryResolutionTest {
 		when(operations.getConverter()).thenReturn(converter);
 		stubMappingContext(converter, mappingContext);
 
-		ValueExpressionDelegate valueExpressionDelegate = new CachingValueExpressionDelegate(
-				ValueExpressionDelegate.create());
-
-		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, projectionFactory, mappingContext);
-		String namedQueryName = queryMethod.getNamedQueryName();
-
-		RepositoryQuery resolvedQuery = null;
-		if (namedQueries.hasQuery(namedQueryName)) {
-			String namedQueryString = namedQueries.getQuery(namedQueryName);
-			resolvedQuery = new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate,
-					namedQueryString);
-		}
-		else if (queryMethod.hasAnnotatedQuery()) {
-			resolvedQuery = new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
-		}
-		else {
-			resolvedQuery = new PartTreeDynamoDbQuery(queryMethod, operations);
-		}
-		return resolvedQuery;
+		return new TestDynamoDbRepositoryFactory(operations).queryLookupStrategy(key).resolveQuery(method, metadata,
+				projectionFactory, namedQueries);
 	}
 
 	@Nested
@@ -154,6 +155,31 @@ class NamedQueryResolutionTest {
 									new SpelAwareProxyProjectionFactory(), new DynamoDbMappingContext()).getName(),
 							resolvedQuery.getQueryMethod().getName(),
 							"Resolved query must wrap the correct DynamoDbQueryMethod"));
+		}
+	}
+
+	@Nested
+	@DisplayName("Query lookup strategy")
+	class QueryLookupStrategyTests {
+
+		@Test
+		@DisplayName("USE_DECLARED_QUERY rejects a method without a named or annotated query")
+		void useDeclaredQueryWithoutDeclarationFailsFast() {
+			NamedQueries namedQueries = new PropertiesBasedNamedQueries(new Properties());
+
+			Assertions.assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> resolveQuery(namedQueries, Key.USE_DECLARED_QUERY));
+		}
+
+		@Test
+		@DisplayName("CREATE ignores a matching named query and derives from the method name")
+		void createIgnoresNamedQuery() throws NoSuchMethodException {
+			Properties properties = new Properties();
+			properties.setProperty(NAMED_QUERY_NAME, NAMED_QUERY_EXPRESSION);
+
+			RepositoryQuery resolved = resolveQuery(new PropertiesBasedNamedQueries(properties), Key.CREATE);
+
+			Assertions.assertInstanceOf(PartTreeDynamoDbQuery.class, resolved);
 		}
 	}
 

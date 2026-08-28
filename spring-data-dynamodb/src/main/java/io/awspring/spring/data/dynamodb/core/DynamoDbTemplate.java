@@ -16,11 +16,8 @@
 package io.awspring.spring.data.dynamodb.core;
 
 import io.awspring.spring.data.dynamodb.core.converter.DynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.IndexKeySchema;
-import io.awspring.spring.data.dynamodb.core.mapping.TypeDiscriminatorRegistry;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterConvertCallback;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterConvertEvent;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterDeleteEvent;
@@ -42,14 +39,11 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequestI
 import io.awspring.spring.data.dynamodb.request.IndexQueryBuilder;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
@@ -71,6 +65,8 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
 /**
+ * Default {@link DynamoDbOperations} implementation backed by an AWS SDK {@link DynamoDbClient}.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -84,6 +80,11 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	private @Nullable EntityCallbacks entityCallbacks;
 	private @Nullable ApplicationEventPublisher eventPublisher;
 
+	/**
+	 * Creates a template.
+	 * @param dynamoDbClient AWS SDK client
+	 * @param converter entity converter
+	 */
 	public DynamoDbTemplate(DynamoDbClient dynamoDbClient, DynamoDbConverter converter) {
 		setDynamoDbClient(dynamoDbClient);
 		this.converter = converter;
@@ -460,35 +461,23 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	}
 
 	@Override
-	public EntityQueryResult<List<Object>> queryPolymorphic(String tableName, DynamoDbQueryRequest queryRequest,
+	public <A> EntityQueryResult<A> queryItemCollection(Class<A> viewClass, DynamoDbQueryRequest dynamoDbRequest,
 			DynamoDbPageRequest dynamoDBPageRequest) {
-		Collection<DynamoDbPersistentEntity<?>> entities = entitiesForTable(tableName);
-		DynamoDbPageRequest pageRequest = dynamoDBPageRequest != null ? dynamoDBPageRequest
-				: DynamoDbPageRequest.of(null);
-		QueryRequest request = statementFactory.query(tableName, entities.iterator().next(), queryRequest, pageRequest);
-		QueryResponse response = execute("query", c -> c.query(request));
-		return toPolymorphicResult(response.items(), response.count(),
-				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities, tableName);
-	}
-
-	@Override
-	@Nullable
-	public <A> EntityQueryResult<A> queryAggregate(Class<A> aggregateClass, DynamoDbQueryRequest dynamoDbRequest,
-			DynamoDbPageRequest dynamoDBPageRequest) {
-		Assert.notNull(aggregateClass, "aggregateClass must not be null");
+		Assert.notNull(viewClass, "viewClass must not be null");
 
 		@SuppressWarnings("unchecked")
-		DynamoDbPersistentEntity<A> entity = (DynamoDbPersistentEntity<A>) getRequiredPersistentEntity(aggregateClass);
+		DynamoDbPersistentEntity<A> entity = (DynamoDbPersistentEntity<A>) getRequiredPersistentEntity(viewClass);
+		Assert.state(entity.isItemCollectionView(), () -> viewClass.getName() + " is not an @ItemCollectionView class");
 		DynamoDbPageRequest pageRequest = dynamoDBPageRequest != null ? dynamoDBPageRequest
 				: DynamoDbPageRequest.of(null);
-		var indexName = entity.getAggregateIndexName();
+		var indexName = entity.getItemCollectionIndexName();
 
 		List<Map<String, AttributeValue>> items = new ArrayList<>();
 		long total = 0L;
 		Map<String, Object> exclusiveStartKey = pageRequest.getLastEvaluatedKey();
 		do {
 			final QueryRequest request = statementFactory.query(entity.getTableName(), entity, dynamoDbRequest,
-					DynamoDbPageRequest.of(null, exclusiveStartKey), indexName);
+					DynamoDbPageRequest.of(pageRequest.getLimit(), exclusiveStartKey), indexName);
 			QueryResponse response = execute("query", c -> c.query(request));
 			items.addAll(response.items());
 			total += response.count() != null ? response.count() : 0L;
@@ -496,7 +485,7 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		}
 		while (exclusiveStartKey != null && !exclusiveStartKey.isEmpty());
 
-		var results = ((MappingDynamoDbConverter) this.converter).readAggregate(items, entity);
+		var results = this.converter.readItemCollection(items, entity);
 		return EntityQueryResult.of(results, (int) total);
 	}
 
@@ -612,7 +601,9 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		maybeEmitEvent(new DynamoDbBeforeUpdateEvent<>(entityClass, tableName));
 		UpdateItemResponse updateItemResponse = execute("updateItem", c -> c.updateItem(updateItemRequest));
 		maybeEmitEvent(new DynamoDbAfterUpdateEvent<>(entityClass, tableName));
-		return EntityWriteResult.of(readAndConvert(entityClass, updateItemResponse.attributes(), tableName));
+		T updated = readAndConvert(entityClass, updateItemResponse.attributes(), tableName);
+		Assert.state(updated != null, "UpdateItem returned no attributes despite ReturnValues.ALL_NEW");
+		return EntityWriteResult.of(updated);
 	}
 
 	@Override
@@ -659,13 +650,14 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 	private long queryCountPages(Class<?> entityClass, DynamoDbQueryRequest baseRequest, boolean stopAtFirstMatch) {
 		String tableName = getTableName(entityClass);
 		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
+		String itemCollectionIndexName = entity.isItemCollectionView() ? entity.getItemCollectionIndexName() : null;
 
 		long total = 0L;
 		Map<String, Object> exclusiveStartKey = null;
 		do {
-			QueryRequest countRequest = statementFactory
-					.query(tableName, entity, baseRequest, DynamoDbPageRequest.of(null, exclusiveStartKey)).toBuilder()
-					.select(Select.COUNT).projectionExpression(null).build();
+			QueryRequest countRequest = statementFactory.query(tableName, entity, baseRequest,
+					DynamoDbPageRequest.of(stopAtFirstMatch ? 1 : null, exclusiveStartKey), itemCollectionIndexName)
+					.toBuilder().select(Select.COUNT).projectionExpression(null).build();
 			QueryResponse response = execute("query", c -> c.query(countRequest));
 
 			total += response.count() != null ? response.count() : 0L;
@@ -716,42 +708,6 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 			scanBuilder.withIndexName(entity.getIndexName());
 		}
 		return new ScanPager<>(entityClass, this::scan).collectAll(scanBuilder.build());
-	}
-
-	@Override
-	public EntityQueryResult<List<Object>> scanPolymorphic(String tableName, DynamoDbScanRequest scanRequest) {
-		Collection<DynamoDbPersistentEntity<?>> entities = entitiesForTable(tableName);
-		var scan = statementFactory.scan(tableName, scanRequest, entities.iterator().next());
-		ScanResponse response = execute("scan", c -> c.scan(scan));
-		return toPolymorphicResult(response.items(), response.count(),
-				response.hasLastEvaluatedKey() ? response.lastEvaluatedKey() : null, entities, tableName);
-	}
-
-	private Collection<DynamoDbPersistentEntity<?>> entitiesForTable(String tableName) {
-		Collection<DynamoDbPersistentEntity<?>> entities = ((DynamoDbMappingContext) converter.getMappingContext())
-				.getEntitiesForTable(tableName);
-		Assert.state(!entities.isEmpty(), () -> "No @Table entity registered for table '" + tableName
-				+ "' -- cannot resolve polymorphic result types.");
-		return entities.stream().sorted(Comparator.comparing(e -> e.getType().getName())).collect(Collectors.toList());
-	}
-
-	private EntityQueryResult<List<Object>> toPolymorphicResult(List<Map<String, AttributeValue>> items, Integer count,
-			@Nullable Map<String, AttributeValue> lastEvaluatedKey, Collection<DynamoDbPersistentEntity<?>> entities,
-			String tableName) {
-		TypeDiscriminatorRegistry registry = TypeDiscriminatorRegistry.fromEntities(entities);
-		List<Object> results = new ArrayList<>(items.size());
-		for (Map<String, AttributeValue> item : items) {
-			if (item != null && !item.isEmpty()) {
-				Object converted = readAndConvert(registry.resolve(item), item, tableName);
-				if (converted != null) {
-					results.add(converted);
-				}
-			}
-		}
-		if (lastEvaluatedKey != null) {
-			return EntityQueryResult.of(results, count, toCursor(lastEvaluatedKey));
-		}
-		return EntityQueryResult.of(results, count);
 	}
 
 	protected EntityOperations getEntityOperations() {
@@ -874,11 +830,11 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 							+ "(use a query() instead).",
 					entity.getType().getName(), entity.getIndexName(), operation));
 		}
-		if (entity.isAggregateView()) {
+		if (entity.isItemCollectionView()) {
 			throw new InvalidDataAccessApiUsageException(String.format(
-					"%s is an @AggregateTable fold and does not support %s -- it is read-only. Writes go through "
-							+ "the @Table entities referenced by its @AggregateItem members "
-							+ "(use findAggregate() to read it).",
+					"%s is an @ItemCollectionView fold and does not support %s -- it is read-only. Writes go through "
+							+ "the @Table entities referenced by its @ItemCollectionMember fields "
+							+ "(use queryItemCollection() to read it).",
 					entity.getType().getName(), operation));
 		}
 	}

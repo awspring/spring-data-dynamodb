@@ -33,13 +33,6 @@ public interface NamingStrategy {
 		return entity.getType().getSimpleName();
 	}
 
-	default String getUserDefinedTypeName(DynamoDbPersistentEntity<?> entity) {
-
-		Assert.notNull(entity, "DynamoDbPersistentEntity must not be null");
-
-		return entity.getType().getSimpleName();
-	}
-
 	default String getColumnName(DynamoDbPersistentProperty property) {
 
 		Assert.notNull(property, "DynamoDbPersistentProperty must not be null");

@@ -19,6 +19,8 @@ import org.springframework.data.repository.NoRepositoryBean;
 import org.springframework.data.repository.Repository;
 
 /**
+ * Marker for read-only repositories backed by a DynamoDB secondary-index view.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

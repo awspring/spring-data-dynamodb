@@ -18,6 +18,8 @@ package io.awspring.spring.data.dynamodb.request;
 import java.util.Map;
 
 /**
+ * Expressions and values for a DynamoDB {@code UpdateItem} request.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

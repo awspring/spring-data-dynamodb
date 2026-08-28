@@ -17,16 +17,18 @@ package io.awspring.spring.data.dynamodb.repository;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.awspring.spring.data.dynamodb.core.DynamoDbOperations;
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
@@ -40,8 +42,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-@DisplayName("SimpleAggregateRepository")
-class SimpleAggregateRepositoryTest {
+@DisplayName("SimpleItemCollectionRepository")
+class SimpleItemCollectionRepositoryTest {
 
 	private static final String TABLE_NAME = "commerce";
 	private static final String PARTITION_KEY_VALUE = "CUSTOMER#1";
@@ -59,14 +61,14 @@ class SimpleAggregateRepositoryTest {
 		String status;
 	}
 
-	@AggregateTable(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
-	static class OrderAggregate {
-		@AggregateItem(regex = "ORDER#[^#]+")
+	@ItemCollectionView(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
+	static class OrderItemCollection {
+		@ItemCollectionMember(regex = "ORDER#[^#]+")
 		OrderRow order;
 	}
 
 	private DynamoDbOperations operations;
-	private SimpleAggregateRepository<OrderAggregate> repository;
+	private SimpleItemCollectionRepository<OrderItemCollection> repository;
 
 	@BeforeEach
 	@SuppressWarnings("unchecked")
@@ -78,16 +80,16 @@ class SimpleAggregateRepositoryTest {
 		this.operations = mock(DynamoDbOperations.class);
 		when(operations.getConverter()).thenReturn(converter);
 
-		DynamoDbEntityInformation<OrderAggregate, ?> entityInformation = mock(DynamoDbEntityInformation.class);
-		when(entityInformation.getJavaType()).thenReturn(OrderAggregate.class);
+		DynamoDbEntityInformation<OrderItemCollection, ?> entityInformation = mock(DynamoDbEntityInformation.class);
+		when(entityInformation.getJavaType()).thenReturn(OrderItemCollection.class);
 
-		this.repository = new SimpleAggregateRepository<>(entityInformation, operations);
+		this.repository = new SimpleItemCollectionRepository<>(entityInformation, operations);
 	}
 
 	private DynamoDbQueryRequest captureRequest(Runnable invocation) {
 		ArgumentCaptor<DynamoDbQueryRequest> captor = ArgumentCaptor.forClass(DynamoDbQueryRequest.class);
-		when(operations.queryAggregate(eq(OrderAggregate.class), captor.capture(), any(DynamoDbPageRequest.class)))
-				.thenReturn(null);
+		when(operations.queryItemCollection(eq(OrderItemCollection.class), captor.capture(),
+				any(DynamoDbPageRequest.class))).thenReturn(null);
 		invocation.run();
 		return captor.getValue();
 	}
@@ -109,15 +111,18 @@ class SimpleAggregateRepositoryTest {
 		}
 
 		@Test
-		@DisplayName("existsByPartitionKey derives an equality key condition")
-		void existsByPartitionKeyDerivesEqualityCondition() {
-			// Act
-			DynamoDbQueryRequest request = captureRequest(() -> repository.existsByPartitionKey(PARTITION_KEY_VALUE));
+		@DisplayName("existsByPartitionKey uses a limit-one count query")
+		void existsByPartitionKeyUsesCountOnlyQuery() {
+			ArgumentCaptor<DynamoDbQueryRequest> captor = ArgumentCaptor.forClass(DynamoDbQueryRequest.class);
+			when(operations.exists(eq(OrderItemCollection.class), captor.capture())).thenReturn(true);
 
-			// Assert
-			assertAll(() -> assertEquals("#pk = :pk", request.getKeyConditionExpression()),
+			boolean exists = repository.existsByPartitionKey(PARTITION_KEY_VALUE);
+			DynamoDbQueryRequest request = captor.getValue();
+
+			assertAll(() -> assertTrue(exists), () -> assertEquals("#pk = :pk", request.getKeyConditionExpression()),
 					() -> assertEquals(Map.of("#pk", "pk"), request.getExpressionAttributeNames()),
 					() -> assertEquals(Map.of(":pk", PARTITION_KEY_VALUE), request.getExpressionAttributeValues()));
+			verify(operations).exists(eq(OrderItemCollection.class), any(DynamoDbQueryRequest.class));
 		}
 	}
 

@@ -18,6 +18,7 @@ package io.awspring.spring.data.dynamodb.repository.query;
 import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.ExpressionValue;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -98,9 +99,17 @@ final class QueryExpressions {
 	}
 
 	static Map<String, String> expressionNames(@Nullable Query query) {
+		return expressionNames(query != null ? query.names() : null);
+	}
+
+	static Map<String, String> expressionNames(@Nullable Update update) {
+		return expressionNames(update != null ? update.names() : null);
+	}
+
+	private static Map<String, String> expressionNames(@Nullable ExpressionName[] mappings) {
 		Map<String, String> names = new LinkedHashMap<>();
-		if (query != null) {
-			for (ExpressionName name : query.names()) {
+		if (mappings != null) {
+			for (ExpressionName name : mappings) {
 				names.put(name.name(), name.value());
 			}
 		}
@@ -109,12 +118,25 @@ final class QueryExpressions {
 
 	static void applyExpressionValues(@Nullable Query query, ValueExpressionDelegate valueExpressionDelegate,
 			Parameters<?, ?> parameters, ParameterAccessor accessor, Map<String, Object> values) {
-		if (query == null || query.values().length == 0) {
+		applyExpressionValues(query != null ? query.values() : null, valueExpressionDelegate, parameters, accessor,
+				values);
+	}
+
+	static void applyExpressionValues(@Nullable Update update, ValueExpressionDelegate valueExpressionDelegate,
+			Parameters<?, ?> parameters, ParameterAccessor accessor, Map<String, Object> values) {
+		applyExpressionValues(update != null ? update.values() : null, valueExpressionDelegate, parameters, accessor,
+				values);
+	}
+
+	private static void applyExpressionValues(@Nullable ExpressionValue[] mappings,
+			ValueExpressionDelegate valueExpressionDelegate, Parameters<?, ?> parameters, ParameterAccessor accessor,
+			Map<String, Object> values) {
+		if (mappings == null || mappings.length == 0) {
 			return;
 		}
 		ValueEvaluationContextProvider contextProvider = valueExpressionDelegate.createValueContextProvider(parameters);
 		Object[] rawArgs = rawArgs(accessor);
-		for (ExpressionValue value : query.values()) {
+		for (ExpressionValue value : mappings) {
 			ValueExpression expression = valueExpressionDelegate.parse(value.value());
 			values.put(value.name(), expression.evaluate(contextProvider.getEvaluationContext(rawArgs)));
 		}

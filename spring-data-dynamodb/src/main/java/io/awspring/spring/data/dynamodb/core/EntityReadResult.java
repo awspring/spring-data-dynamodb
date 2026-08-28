@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core;
 
 /**
+ * Read result with an optional PartiQL continuation token.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

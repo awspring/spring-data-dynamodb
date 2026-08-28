@@ -15,15 +15,13 @@
  */
 package io.awspring.spring.data.dynamodb.core.converter;
 
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.BasicDynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
 import io.awspring.spring.data.dynamodb.core.mapping.KeyRole;
 import io.awspring.spring.data.dynamodb.core.mapping.KeyTemplate;
 import io.awspring.spring.data.dynamodb.core.mapping.KeyTemplateResolver;
-import io.awspring.spring.data.dynamodb.core.mapping.TypeDiscriminatorRegistry;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -104,7 +102,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		Assert.notNull(items, "items must not be null");
 		Assert.notNull(persistentEntity, "DynamoDbPersistentEntity must not be null");
 
-		ConvertingPropertyAccessor convertingPropertyAccessor = newConvertingPropertyAccessor(obj, persistentEntity);
+		ConvertingPropertyAccessor<?> convertingPropertyAccessor = newConvertingPropertyAccessor(obj, persistentEntity);
 		for (DynamoDbPersistentProperty property : persistentEntity) {
 			if (property.isDerived()) {
 				continue;
@@ -230,15 +228,34 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			}
 			else if (property.isSpecialType() && !property.serializeAsNestedMap()) {
 				Object nested = accessor.getProperty(property);
+				Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
+				DynamoDbPersistentEntity<?> persistentEntity = getMappingContext()
+						.getRequiredPersistentEntity(beanClassLoaderClass);
 				if (nested != null) {
-					Class<?> beanClassLoaderClass = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
-					DynamoDbPersistentEntity<?> persis = getMappingContext()
-							.getRequiredPersistentEntity(beanClassLoaderClass);
-					updateRecursive(nested, values, persis);
+					updateRecursive(nested, values, persistentEntity);
+				}
+				else {
+					clearFlattened(values, persistentEntity);
 				}
 			}
 			else {
 				writeInternalUpdate(accessor, property, values);
+			}
+		}
+	}
+
+	private void clearFlattened(Map<String, AttributeValueUpdate> values, DynamoDbPersistentEntity<?> entity) {
+		for (DynamoDbPersistentProperty property : entity) {
+			if (property.isIdProperty() || isBaseTableSortKey(property) || property.isDerived()) {
+				continue;
+			}
+			if (property.isSpecialType() && !property.serializeAsNestedMap()) {
+				Class<?> nestedType = transformClassToBeanClassLoaderClass(property.getTypeOfProperty());
+				clearFlattened(values, getMappingContext().getRequiredPersistentEntity(nestedType));
+			}
+			else {
+				values.put(property.getColumnName(), AttributeValueUpdate.builder()
+						.value(AttributeValue.builder().nul(Boolean.TRUE).build()).build());
 			}
 		}
 	}
@@ -328,45 +345,6 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		return read(source, entity);
 	}
 
-	@Nullable
-	public Object read(Map<String, AttributeValue> source) {
-		Assert.notNull(source, "source must not be null");
-		if (source.isEmpty()) {
-			return null;
-		}
-		String tableName = resolveTableNameFromRegisteredEntities(source);
-		Collection<DynamoDbPersistentEntity<?>> candidates = this.mappingContext.getEntitiesForTable(tableName);
-		TypeDiscriminatorRegistry registry = TypeDiscriminatorRegistry.fromEntities(candidates);
-		Class<?> resolvedType = registry.resolve(source);
-		DynamoDbPersistentEntity<?> entity = getMappingContext().getRequiredPersistentEntity(resolvedType);
-		return read(source, entity);
-	}
-
-	private String resolveTableNameFromRegisteredEntities(Map<String, AttributeValue> source) {
-		for (BasicDynamoDbPersistentEntity<?> candidate : this.mappingContext.getPersistentEntities()) {
-			String column = candidate.getDiscriminatorColumn();
-			if (column.isEmpty()) {
-				continue;
-			}
-			AttributeValue tagValue = source.get(column);
-			if (tagValue != null && tagValue.s() != null && tagValue.s().equals(candidate.getTypeName())) {
-				return candidate.getTableName();
-			}
-		}
-		throw new MappingException("Cannot resolve a table for a class-less read: no registered entity's "
-				+ "@Table(discriminator=...) column matched a value equal to that entity's typeName(). "
-				+ "A class-less read requires at least one entity to opt into a discriminator. Item keys: "
-				+ source.keySet());
-	}
-
-	public void stampDiscriminator(Map<String, AttributeValue> sink, DynamoDbPersistentEntity<?> entity) {
-		String column = entity.getDiscriminatorColumn();
-		if (column.isEmpty()) {
-			return;
-		}
-		sink.put(column, AttributeValue.builder().s(entity.getTypeName()).build());
-	}
-
 	public <R> R read(Map<String, AttributeValue> source, DynamoDbPersistentEntity<R> entity) {
 		EntityInstantiator instantiator = this.instantiators.getInstantiatorFor(entity);
 		InstanceCreatorMetadata<DynamoDbPersistentProperty> creatorMetadata = entity.getInstanceCreatorMetadata();
@@ -403,29 +381,30 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		return instance;
 	}
 
+	@Override
 	@SuppressWarnings("unchecked")
-	public <A> A readAggregate(List<Map<String, AttributeValue>> items, DynamoDbPersistentEntity<A> aggregateEntity) {
+	public <A> A readItemCollection(List<Map<String, AttributeValue>> items, DynamoDbPersistentEntity<A> viewEntity) {
 
 		Assert.notNull(items, "items must not be null");
-		Assert.state(aggregateEntity.isAggregateView(),
-				() -> aggregateEntity.getType().getName() + " is not an @AggregateTable class");
+		Assert.state(viewEntity.isItemCollectionView(),
+				() -> viewEntity.getType().getName() + " is not an @ItemCollectionView class");
 
-		String sortKeyColumn = aggregateEntity.getAggregateSortKeyColumn();
+		String sortKeyColumn = viewEntity.getItemCollectionSortKeyColumn();
 
-		A instance = instantiators.getInstantiatorFor(aggregateEntity).createInstance(aggregateEntity,
+		A instance = instantiators.getInstantiatorFor(viewEntity).createInstance(viewEntity,
 				NoOpParameterValueProvider.INSTANCE);
-		ConvertingPropertyAccessor<A> accessor = newConvertingPropertyAccessor(instance, aggregateEntity);
+		ConvertingPropertyAccessor<A> accessor = newConvertingPropertyAccessor(instance, viewEntity);
 
-		for (DynamoDbPersistentProperty property : aggregateEntity) {
-			if (!property.isAggregateItem()) {
+		for (DynamoDbPersistentProperty property : viewEntity) {
+			if (!property.isItemCollectionMember()) {
 				continue;
 			}
 			if (property.isCollectionLike()) {
-				accessor.setProperty(property, readAggregateItemList(items, sortKeyColumn, property));
+				accessor.setProperty(property, readItemCollectionMemberList(items, sortKeyColumn, property));
 			}
 			else {
 				accessor.setProperty(property,
-						readAggregateChildSingle(items, sortKeyColumn, property, aggregateEntity));
+						readItemCollectionMemberSingle(items, sortKeyColumn, property, viewEntity));
 			}
 		}
 
@@ -433,14 +412,14 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 	}
 
 	@Nullable
-	private Object readAggregateChildSingle(List<Map<String, AttributeValue>> items, String sortKeyColumn,
-			DynamoDbPersistentProperty property, DynamoDbPersistentEntity<?> aggregateEntity) {
-		sortKeyColumn = StringUtils.hasText(property.getAggregateItem().sortKey())
-				? property.getAggregateItem().sortKey()
+	private Object readItemCollectionMemberSingle(List<Map<String, AttributeValue>> items, String sortKeyColumn,
+			DynamoDbPersistentProperty property, DynamoDbPersistentEntity<?> viewEntity) {
+		sortKeyColumn = StringUtils.hasText(property.getItemCollectionMember().sortKey())
+				? property.getItemCollectionMember().sortKey()
 				: sortKeyColumn;
 		Class<?> rowType = transformClassToBeanClassLoaderClass(property.getType());
 		DynamoDbPersistentEntity<?> rowEntity = getMappingContext().getRequiredPersistentEntity(rowType);
-		AggregateItemMatcher matcher = AggregateItemMatcher.forProperty(property);
+		ItemCollectionMemberMatcher matcher = ItemCollectionMemberMatcher.forProperty(property);
 
 		Object matched = null;
 		for (Map<String, AttributeValue> item : items) {
@@ -448,25 +427,25 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 				continue;
 			}
 			Assert.state(matched == null,
-					() -> aggregateEntity.getType().getName() + "." + property.getName()
-							+ " matched more than one item in the partition; a single-valued @AggregateItem "
+					() -> viewEntity.getType().getName() + "." + property.getName()
+							+ " matched more than one item in the partition; a single-valued @ItemCollectionMember "
 							+ "member must match at most one item -- use a List<> if more than one is expected");
 			matched = read(item, rowEntity);
 		}
 		return matched;
 	}
 
-	private List<Object> readAggregateItemList(List<Map<String, AttributeValue>> items, String sortKeyColumn,
+	private List<Object> readItemCollectionMemberList(List<Map<String, AttributeValue>> items, String sortKeyColumn,
 			DynamoDbPersistentProperty property) {
 
-		sortKeyColumn = StringUtils.hasText(property.getAggregateItem().sortKey())
-				? property.getAggregateItem().sortKey()
+		sortKeyColumn = StringUtils.hasText(property.getItemCollectionMember().sortKey())
+				? property.getItemCollectionMember().sortKey()
 				: sortKeyColumn;
 
 		Class<?> rowType = transformClassToBeanClassLoaderClass(
 				property.getTypeInformation().getRequiredComponentType().getType());
 		DynamoDbPersistentEntity<?> rowEntity = getMappingContext().getRequiredPersistentEntity(rowType);
-		AggregateItemMatcher matcher = AggregateItemMatcher.forProperty(property);
+		ItemCollectionMemberMatcher matcher = ItemCollectionMemberMatcher.forProperty(property);
 
 		List<Object> matched = new ArrayList<>();
 		for (Map<String, AttributeValue> item : items) {
@@ -483,23 +462,23 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		return value != null ? value.s() : null;
 	}
 
-	private static final class AggregateItemMatcher {
+	private static final class ItemCollectionMemberMatcher {
 
 		private final String startsWith;
 		private final String endsWith;
 		private final @Nullable Pattern regex;
 
-		private AggregateItemMatcher(String startsWith, String endsWith, @Nullable Pattern regex) {
+		private ItemCollectionMemberMatcher(String startsWith, String endsWith, @Nullable Pattern regex) {
 			this.startsWith = startsWith;
 			this.endsWith = endsWith;
 			this.regex = regex;
 		}
 
-		static AggregateItemMatcher forProperty(DynamoDbPersistentProperty property) {
-			AggregateItem rule = property.getAggregateItem();
-			Assert.state(rule != null, () -> property.getName() + " has no @AggregateItem rule");
+		static ItemCollectionMemberMatcher forProperty(DynamoDbPersistentProperty property) {
+			ItemCollectionMember rule = property.getItemCollectionMember();
+			Assert.state(rule != null, () -> property.getName() + " has no @ItemCollectionMember rule");
 			Pattern compiled = rule.regex() != null && !rule.regex().isEmpty() ? Pattern.compile(rule.regex()) : null;
-			return new AggregateItemMatcher(rule.startsWith(), rule.endsWith(), compiled);
+			return new ItemCollectionMemberMatcher(rule.startsWith(), rule.endsWith(), compiled);
 		}
 
 		boolean matches(@Nullable String sortKeyValue) {
@@ -602,7 +581,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 	private void fetchKeysAndPopulate(Object toBeUsed, Map<String, AttributeValue> keys,
 			DynamoDbPersistentEntity<?> entity) {
 		DynamoDbPersistentProperty persistentProperty = entity.getIdProperty();
-		ConvertingPropertyAccessor convertingPropertyAccessor = newConvertingPropertyAccessor(toBeUsed, entity);
+		ConvertingPropertyAccessor<?> convertingPropertyAccessor = newConvertingPropertyAccessor(toBeUsed, entity);
 		keys.put(persistentProperty.getColumnName(),
 				toAttributeValue(convertingPropertyAccessor.getProperty(persistentProperty), false));
 
@@ -767,7 +746,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 					return attributeValue.l().stream().map(av -> convertElementToType(av, elementType))
 							.collect(Collectors.toList());
 				}
-				return attributeValue.l().stream().map(value -> convert(value, type)).collect(Collectors.toList());
+				return attributeValue.l().stream().map(this::convertPrimitiveType).collect(Collectors.toList());
 			}
 			else if (attributeValue.hasNs()) {
 				if (elementType != null) {
@@ -892,15 +871,6 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			throw new MappingException("Cannot reconstruct " + type
 					+ " from its nested-map encoding (@InnerClass(serializeAsNestedMap = true))"
 					+ " -- requires a no-arg constructor", e);
-		}
-	}
-
-	public Object convert(AttributeValue attributeValue, Class type) {
-		try {
-			return convertPrimitiveType(attributeValue);
-		}
-		catch (UnsupportedOperationException e) {
-			return attributeValue;
 		}
 	}
 

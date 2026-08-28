@@ -15,9 +15,14 @@
  */
 package io.awspring.spring.data.examples.repository;
 
-import io.awspring.spring.data.examples.model.Order;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.Update;
+import io.awspring.spring.data.examples.model.Order;
+import io.awspring.spring.data.examples.model.OrderStatus;
+import java.util.List;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -26,4 +31,17 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public interface OrderRepository extends DynamoDbRepository<Order, DynamoDbCompositeId> {
+
+	List<Order> findByPkOrderBySkDesc(String pk);
+
+	List<Order> findTop1ByPkOrderBySkDesc(String pk);
+
+	long countByPk(String pk);
+
+	boolean existsByPk(String pk);
+
+	@Update(updateExpression = "SET #status = :status, #gsi1pk = :gsi1pk", names = {
+			@ExpressionName(name = "#status", value = "status"), @ExpressionName(name = "#gsi1pk", value = "gsi1pk") })
+	Order changeStatus(@Param("pk") String pk, @Param("sk") String sk, @Param("status") OrderStatus status,
+			@Param("gsi1pk") String gsi1pk);
 }

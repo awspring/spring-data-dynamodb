@@ -13,16 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.spring.data.examples.repository;
+package io.awspring.spring.data.examples.service.usecase;
 
-import io.awspring.spring.data.examples.model.AggregateOrder;
-import io.awspring.spring.data.dynamodb.repository.AggregateRepository;
-import org.springframework.stereotype.Repository;
+final class ExampleData {
 
-/**
- * @author Matej Nedic
- * @since 1.0.0
- */
-@Repository
-public interface AggregateOrderRepository extends AggregateRepository<AggregateOrder> {
+	static final String CUSTOMER_ID = "12345";
+	static final String ORDER_ID = "1321";
+	static final String CUSTOMER_PK = "CUSTOMER#" + CUSTOMER_ID;
+	static final String ACCOUNT_PK = "ACCOUNT#" + CUSTOMER_ID;
+	static final String PROFILE_SK = "#PROFILE";
+	static final String ORDER_SK = "ORDER#" + ORDER_ID;
+	static final String ITEM_PREFIX = ORDER_SK + "#ITEM#";
+	static final String EMAIL = "matej@example.com";
+
+	private ExampleData() {
+	}
 }

@@ -18,11 +18,14 @@ package io.awspring.spring.data.dynamodb.core.mapping.events;
 import org.springframework.data.mapping.callback.EntityCallback;
 
 /**
+ * Invoked after a DynamoDB item is converted into an entity.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 @FunctionalInterface
 public interface DynamoDbAfterConvertCallback<T> extends EntityCallback<T> {
 
+	/** @return the entity returned by the read operation */
 	T onAfterConvert(T entity, String tableName);
 }

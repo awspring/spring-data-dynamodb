@@ -18,11 +18,14 @@ package io.awspring.spring.data.dynamodb.core.mapping.events;
 import org.springframework.data.mapping.callback.EntityCallback;
 
 /**
+ * Invoked before a save entity enters DynamoDB conversion.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 @FunctionalInterface
 public interface DynamoDbBeforeConvertCallback<T> extends EntityCallback<T> {
 
+	/** @return the entity to continue saving */
 	T onBeforeConvert(T entity, String tableName);
 }

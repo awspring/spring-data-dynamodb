@@ -19,8 +19,12 @@ import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 
+/**
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Table(tableName = "arena")
-public class MatchSkAggregate extends MatchSK {
+public class PlayerContactItemCollectionRow extends PlayerContact {
 	@PartitionKey
 	private String partitionKey;
 	@SortKey
@@ -40,15 +44,5 @@ public class MatchSkAggregate extends MatchSK {
 
 	public void setSortKey(String sortKey) {
 		this.sortKey = sortKey;
-	}
-
-	@Override
-	public boolean equals(Object object) {
-		return super.equals(object);
-	}
-
-	@Override
-	public int hashCode() {
-		return super.hashCode();
 	}
 }

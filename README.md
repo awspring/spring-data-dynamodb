@@ -19,8 +19,8 @@ For a deep dive into the project, refer to the Spring Data DynamoDB documentatio
 - **Spring Data Repository Support**: Familiar Spring Data repository abstractions for DynamoDB
 - **Query Methods**: Derive queries from method names, or write expressions explicitly with `@Query`
 - **Secondary Index Views**: Read-only, typed views over Global and Local Secondary Indexes
-- **Single-Table Design**: Polymorphic containers with `@InnerClass` prefix or regex routing
-- **Aggregate Reads**: Fold a partition's heterogeneous rows into one typed object via `@AggregateTable` and `AggregateRepository`
+- **Single-Table Design**: Heterogeneous containers with `@InnerClass` prefix or regex routing
+- **Item-Collection Views**: Fold a partition's heterogeneous rows into one typed object via `@ItemCollectionView` and `ItemCollectionRepository`
 - **Sort Key Templates**: Compose and decompose sort keys from several properties
 - **Keyset Pagination**: `Window<T>` pagination backed by DynamoDB's `LastEvaluatedKey`
 - **Optimistic Locking**: `@Version`-based conditional writes
@@ -159,7 +159,7 @@ public class Match {
 }
 ```
 
-### Polymorphic Containers
+### Heterogeneous Containers
 
 `@InnerClass` flattens an embedded object into the owning item, and routes each row to the one field
 whose shape it actually is. Routing is decided by matching the row's sort key against `startsWith`,
@@ -190,42 +190,40 @@ compiled once when the entity is first mapped, so an invalid pattern fails at bo
 declared conditions must hold if you combine `regex` with `startsWith`/`endsWith`.
 
 Ambiguity is not checked: if two members can match the same sort key, both are populated. Keep the
-routes mutually exclusive, or drive the dispatch off an explicit discriminator attribute instead —
-`@Table(discriminator = "TYPE", typeName = "ORDER")` plus
-`DynamoDbOperations.queryPolymorphic(...)`, which returns each row already typed.
+routes mutually exclusive.
 
 
-### Aggregation Annotation
+### Item-Collection Views
 
-`@AggregateTable` provides a simpler, read-only approach to modeling Single Table Design for query use cases. It groups related entities from the same partition into a single aggregate result, making it easier to work with heterogeneous items without manually checking each returned object.
+`@ItemCollectionView` provides a simpler, read-only approach to modeling Single Table Design for query use cases. It groups related entities from the same partition into a single typed view, making it easier to work with heterogeneous items without manually checking each returned object.
 
-`@AggregateItem` identifies which `@Table` entity should be mapped to each field. Routing is based on the sort key and can use `startsWith`, `endsWith`, or `regex`:
+`@ItemCollectionMember` identifies which projection row type should be mapped to each field. Routing is based on the sort key and can use `startsWith`, `endsWith`, or `regex`:
 
 ```java
-@AggregateTable(tableName = "single_table_demo", partitionKey = "pk", sortKey = "sk")
+@ItemCollectionView(tableName = "single_table_demo", partitionKey = "pk", sortKey = "sk")
 public class CustomerRow {
 
 
-    @AggregateItem(regex = "ORDER#[^#]+")               // "ORDER#9876"
+    @ItemCollectionMember(regex = "ORDER#[^#]+")               // "ORDER#9876"
     private OrderData order;
 
 
-    @AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+", sortKey ="canBeAnotherSortKeyNameForComplexQueries")    // "ORDER#9876#LINE#abc"
+    @ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+", sortKey ="canBeAnotherSortKeyNameForComplexQueries")    // "ORDER#9876#LINE#abc"
     private List<OrderLineData> line;
 }
 ```
 
-Unlike `@InnerClass`, `@AggregateTable` is intended specifically for read-only aggregation. It groups the matching entities into the appropriate fields of the aggregate instead of requiring callers to inspect every returned object and check which fields are null.
+Unlike `@InnerClass`, `@ItemCollectionView` is intended specifically for read-only aggregation. It groups the matching entities into the appropriate fields of the view instead of requiring callers to inspect every returned object and check which fields are null.
 
-The classes referenced by `@AggregateItem` must be annotated with `@Table`. `@AggregateItem` itself does not define or embed the entity mapping, it determines which `@Table` entity should be used when the aggregate query is materialized.
+The classes referenced by `@ItemCollectionMember` are projection row types and do not require `@Table`; the enclosing `@ItemCollectionView` defines the physical table and index. A projection type may still use `@Table` when it is also reused as an independently writable entity.
 
-`@AggregateItem` can specify `sortKey` when sortKey name is different then one in `@AggregateTable`. This can come useful when multiple sortKeys are matched in GlobalSecondaryIndex query.
+`@ItemCollectionMember` can specify `sortKey` when sortKey name is different then one in `@ItemCollectionView`. This can come useful when multiple sortKeys are matched in GlobalSecondaryIndex query.
 
-Read an aggregate through an `AggregateRepository<A>` — the read-only counterpart to
+Read an item-collection view through an `ItemCollectionRepository<A>` — the read-only counterpart to
 `SecondaryIndexRepository`, with a fixed set of partition-oriented finders:
 
 ```java
-public interface CustomerAggregateRepository extends AggregateRepository<CustomerRow> {
+public interface CustomerItemCollectionRepository extends ItemCollectionRepository<CustomerRow> {
 }
 
 Optional<CustomerRow> customer = repository.findByPartitionKey("CUSTOMER#123");
@@ -235,7 +233,7 @@ Optional<CustomerRow> customer = repository.findByPartitionKey("CUSTOMER#123");
 `findByPartitionKeyAndSortKeyBetween` and `existsByPartitionKey` complete the interface, and a
 `@Query` method can pass a hand-written key condition straight through. Every finder pages through
 the whole matched partition before folding. For an ad-hoc key condition without a repository, call
-`DynamoDbOperations.queryAggregate(...)` directly.
+`DynamoDbOperations.queryItemCollection(...)` directly.
 
 ### `@Query` — explicit expressions
 
@@ -332,8 +330,9 @@ make clean     # remove all build output
 make           # list the available targets
 ```
 
-`make docs` writes the rendered reference guide to `docs/target/generated-docs/` and the aggregated
-Javadoc to `target/site/apidocs/`.
+`make docs` writes the rendered reference guide to
+`docs/target/generated-docs/reference/html/reference.html` and the aggregated Javadoc to
+`target/site/apidocs/index.html`. The build verifies formatting without modifying source files.
 
 Integration tests run against [LocalStack](https://localstack.cloud) via Testcontainers, so a running
 Docker daemon is required for the full test suite.

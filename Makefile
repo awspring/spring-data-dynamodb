@@ -7,7 +7,7 @@
 MVN := $(shell command -v mvnd 2>/dev/null || echo ./mvnw)
 
 .DEFAULT_GOAL := help
-.PHONY: help build clean format check test docs docs-open
+.PHONY: help build clean format check test doc docs docs-open
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -28,13 +28,15 @@ check: ## Verify formatting without modifying sources
 test: ## Run the full test suite (integration tests need a running Docker daemon)
 	$(MVN) test
 
-docs: ## Build the reference documentation and the API docs
-	$(MVN) package -Pdocs -DskipTests
+doc: docs ## Alias for docs
+
+docs: ## Build the reference documentation and the API docs without formatting sources
+	$(MVN) package -Pdocs -DskipTests -Dspotless.apply.skip=true
 	@echo
-	@echo "Reference documentation: docs/target/generated-docs/"
-	@echo "API documentation:       target/site/apidocs/"
+	@echo "Reference documentation: docs/target/generated-docs/reference/html/reference.html"
+	@echo "API documentation:       target/site/apidocs/index.html"
 
 docs-open: docs ## Build the docs, then open the reference guide
-	@open docs/target/generated-docs/reference.html 2>/dev/null \
-		|| xdg-open docs/target/generated-docs/reference.html 2>/dev/null \
-		|| echo "Open docs/target/generated-docs/reference.html manually"
+	@open docs/target/generated-docs/reference/html/reference.html 2>/dev/null \
+		|| xdg-open docs/target/generated-docs/reference/html/reference.html 2>/dev/null \
+		|| echo "Open docs/target/generated-docs/reference/html/reference.html manually"

@@ -19,6 +19,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
+ * Per-request limit and exclusive-start cursor for DynamoDB pagination.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -30,7 +32,8 @@ public class DynamoDbPageRequest {
 	public static DynamoDbPageRequest of(Integer limit, Map<String, Object> lastEvaluatedKey) {
 		DynamoDbPageRequest dynamoDBPageRequest = new DynamoDbPageRequest();
 		dynamoDBPageRequest.limit = limit;
-		dynamoDBPageRequest.lastEvaluatedKey = lastEvaluatedKey;
+		dynamoDBPageRequest.lastEvaluatedKey = lastEvaluatedKey != null ? new HashMap<>(lastEvaluatedKey)
+				: new HashMap<>();
 		return dynamoDBPageRequest;
 	}
 

@@ -15,9 +15,14 @@
  */
 package io.awspring.spring.data.examples.repository;
 
-import io.awspring.spring.data.examples.model.Customer;
+import io.awspring.spring.data.dynamodb.repository.AllowScan;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.examples.model.Customer;
+import java.util.List;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -25,5 +30,19 @@ import org.springframework.stereotype.Repository;
  * @since 1.0.0
  */
 @Repository
-public interface CustomerRepository extends DynamoDbRepository<Customer, DynamoDbCompositeId> {
+public interface CustomerRepository extends DynamoDbRepository<Customer, DynamoDbCompositeId<String, String>> {
+
+	@AllowScan
+	List<Customer> findByEmail(String email);
+
+	@AllowScan
+	@Query(filterExpression = "#email = :email", names = @ExpressionName(name = "#email", value = "email"))
+	List<Customer> findExplicitByEmail(@Param("email") String email);
+
+	@AllowScan
+	@Query(names = @ExpressionName(name = "#email", value = "email"))
+	List<Customer> findNamedByEmail(@Param("email") String email);
+
+	@Query(partiQl = "SELECT * FROM \"Commerce\" WHERE \"email\" = ?")
+	List<Customer> findByEmailWithPartiQl(String email);
 }

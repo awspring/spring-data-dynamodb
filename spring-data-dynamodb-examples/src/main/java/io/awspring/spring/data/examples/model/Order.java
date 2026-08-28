@@ -22,6 +22,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import org.springframework.data.annotation.Version;
 
 /**
  * @author Matej Nedic
@@ -60,6 +61,9 @@ public class Order {
 
 	@Column("gsi2sk")
 	private String gsi2sk;
+
+	@Version
+	private Long version;
 
 	public Order() {
 	}
@@ -176,5 +180,13 @@ public class Order {
 
 	public void setShippingAddress(Address shippingAddress) {
 		this.shippingAddress = shippingAddress;
+	}
+
+	public Long getVersion() {
+		return version;
+	}
+
+	public void setVersion(Long version) {
+		this.version = version;
 	}
 }

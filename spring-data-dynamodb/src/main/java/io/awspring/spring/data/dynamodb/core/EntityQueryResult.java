@@ -16,37 +16,41 @@
 package io.awspring.spring.data.dynamodb.core;
 
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
+ * Query or scan result with count and optional continuation cursor.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
 public class EntityQueryResult<T> {
 
 	private final T entity;
-	private final Integer count;
+	private final @Nullable Integer count;
 
-	private final Map<String, Object> lastEvaluatedKey;
+	private final @Nullable Map<String, Object> lastEvaluatedKey;
 
-	private EntityQueryResult(T entity, Integer count) {
+	private EntityQueryResult(T entity, @Nullable Integer count) {
 		this(entity, count, null);
 	}
 
-	private EntityQueryResult(T entity, Integer count, Map<String, Object> lastEvaluatedKey) {
+	private EntityQueryResult(T entity, @Nullable Integer count, @Nullable Map<String, Object> lastEvaluatedKey) {
 		this.entity = entity;
 		this.count = count;
 		this.lastEvaluatedKey = lastEvaluatedKey;
 	}
 
-	static <T> EntityQueryResult<T> of(T entity) {
+	public static <T> EntityQueryResult<T> of(T entity) {
 		return new EntityQueryResult<T>(entity, null);
 	}
 
-	static <T> EntityQueryResult<T> of(T entity, Integer count) {
+	public static <T> EntityQueryResult<T> of(T entity, @Nullable Integer count) {
 		return new EntityQueryResult<T>(entity, count);
 	}
 
-	static <T> EntityQueryResult<T> of(T entity, Integer count, Map<String, Object> lastEvaluatedKey) {
+	public static <T> EntityQueryResult<T> of(T entity, @Nullable Integer count,
+			@Nullable Map<String, Object> lastEvaluatedKey) {
 		return new EntityQueryResult<T>(entity, count, lastEvaluatedKey);
 	}
 
@@ -54,10 +58,12 @@ public class EntityQueryResult<T> {
 		return entity;
 	}
 
+	@Nullable
 	public Integer getCount() {
 		return count;
 	}
 
+	@Nullable
 	public Map<String, Object> getLastEvaluatedKey() {
 		return lastEvaluatedKey;
 	}

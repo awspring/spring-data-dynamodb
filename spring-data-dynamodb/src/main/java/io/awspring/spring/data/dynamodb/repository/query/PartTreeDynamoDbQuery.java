@@ -27,6 +27,7 @@ import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mapping.context.MappingContext;
 import org.springframework.data.repository.query.ParameterAccessor;
+import org.springframework.data.repository.query.parser.Part;
 import org.springframework.data.repository.query.parser.PartTree;
 
 /**
@@ -46,7 +47,31 @@ public class PartTreeDynamoDbQuery extends AbstractDynamoDbQuery {
 		this.tree = new PartTree(queryMethod.getName(), this.domainClass);
 		this.mappingContext = operations.getConverter().getMappingContext();
 
+		verifySupportedKeywords(queryMethod);
 		verifyServableEagerly(queryMethod);
+	}
+
+	private void verifySupportedKeywords(DynamoDbQueryMethod queryMethod) {
+
+		if (this.tree.isDelete()) {
+			throw unsupportedKeyword(queryMethod, "Delete/remove derived queries are not supported; use an explicit "
+					+ "@Update operation or repository delete operation");
+		}
+		if (this.tree.isDistinct()) {
+			throw unsupportedKeyword(queryMethod, "Distinct derived queries are not supported by DynamoDB Query");
+		}
+		for (PartTree.OrPart orPart : this.tree) {
+			for (Part part : orPart) {
+				if (part.shouldIgnoreCase() != Part.IgnoreCaseType.NEVER) {
+					throw unsupportedKeyword(queryMethod,
+							"IgnoreCase is not supported because DynamoDB comparisons are case-sensitive");
+				}
+			}
+		}
+	}
+
+	private InvalidDataAccessApiUsageException unsupportedKeyword(DynamoDbQueryMethod queryMethod, String reason) {
+		return new InvalidDataAccessApiUsageException(reason + ". Method: " + queryMethod);
 	}
 
 	private void verifyServableEagerly(DynamoDbQueryMethod queryMethod) {

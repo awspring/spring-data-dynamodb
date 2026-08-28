@@ -72,6 +72,28 @@ class AbstractDynamoDbConfigurationCustomConversionsTest {
 		}
 	}
 
+	@Nested
+	@DisplayName("Numeric simple types")
+	class NumericSimpleTypes {
+
+		private final DynamoDbConversions conversions = new DynamoDbConversions(List.of());
+
+		@Test
+		@DisplayName("treats BigDecimal, BigInteger and JDK number wrappers as simple types")
+		void numberSubtypes_areSimpleTypes() {
+
+			var simpleTypeHolder = conversions.getSimpleTypeHolder();
+
+			assertAll(
+					() -> assertTrue(simpleTypeHolder.isSimpleType(java.math.BigDecimal.class),
+							"BigDecimal should be a simple type"),
+					() -> assertTrue(simpleTypeHolder.isSimpleType(java.math.BigInteger.class),
+							"BigInteger should be a simple type"),
+					() -> assertTrue(simpleTypeHolder.isSimpleType(Integer.class), "Integer should be a simple type"),
+					() -> assertTrue(simpleTypeHolder.isSimpleType(Long.class), "Long should be a simple type"));
+		}
+	}
+
 	// --- Test fixtures ---
 
 	static class TestConfiguration extends AbstractDynamoDbConfiguration {

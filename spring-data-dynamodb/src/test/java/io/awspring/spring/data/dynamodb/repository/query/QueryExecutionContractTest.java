@@ -28,8 +28,8 @@ import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.ExpressionName;
-import io.awspring.spring.data.dynamodb.repository.Modifying;
 import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.dynamodb.repository.Update;
 import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -76,22 +76,18 @@ class QueryExecutionContractTest {
 
 		List<Match> findByPk(String pk);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		void recordWinnerReturningNothing(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		boolean recordWinnerReturningBoolean(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		int recordWinnerReturningCount(@Param("pk") String pk, @Param("sk") String sk, @Param("winner") String winner);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		Match recordWinnerReturningEntity(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
 	}
@@ -101,12 +97,24 @@ class QueryExecutionContractTest {
 		@Query(keyConditionExpression = "#pk = :pk", indexName = "GSI1", limit = 0, names = @ExpressionName(name = "#pk", value = "pk"))
 		List<Match> findWithZeroLimit(@Param("pk") String pk);
 
+		@Query(keyConditionExpression = "#pk = :pk", indexName = "GSI1", consistentRead = true, names = @ExpressionName(name = "#pk", value = "pk"))
+		List<Match> findConsistentlyOnGsi(@Param("pk") String pk);
+
+		List<Match> deleteByPk(String pk);
+
+		List<Match> findDistinctByPk(String pk);
+
+		List<Match> findByRegionIgnoreCase(String region);
+
 		List<Match> findTop2ByPk(String pk, Limit limit);
 
-		@Modifying
-		@Query(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
 		String recordWinnerReturningNonsense(@Param("pk") String pk, @Param("sk") String sk,
 				@Param("winner") String winner);
+
+		@Update(updateExpression = "SET #winner = :winner", names = @ExpressionName(name = "#winner", value = "winner"))
+		@Query(filterExpression = "#winner = :winner", allowScan = true)
+		void queryAndUpdate(@Param("pk") String pk, @Param("sk") String sk, @Param("winner") String winner);
 	}
 
 	private PartTreeDynamoDbQueryReplayTest.CapturingOperations operations() {
@@ -196,28 +204,27 @@ class QueryExecutionContractTest {
 	}
 
 	@Nested
-	@DisplayName("@Modifying return types")
-	class ModifyingReturnTypeTests {
+	@DisplayName("@Update return types")
+	class UpdateReturnTypeTests {
 
 		@Test
 		@DisplayName("return types follow the Spring Data JDBC convention")
-		void modifyingReturnTypesFollowTheSpringDataJdbcConvention() throws NoSuchMethodException {
+		void updateReturnTypesFollowTheSpringDataJdbcConvention() throws NoSuchMethodException {
 			Match updated = new Match();
 			updated.pk = PK_P1;
 
-			assertAll(
-					() -> assertNull(executeModifying("recordWinnerReturningNothing", updated), "void reports nothing"),
-					() -> assertEquals(Boolean.TRUE, executeModifying("recordWinnerReturningBoolean", updated),
+			assertAll(() -> assertNull(executeUpdate("recordWinnerReturningNothing", updated), "void reports nothing"),
+					() -> assertEquals(Boolean.TRUE, executeUpdate("recordWinnerReturningBoolean", updated),
 							"boolean reports that the update applied"),
-					() -> assertEquals(1, executeModifying("recordWinnerReturningCount", updated),
+					() -> assertEquals(1, executeUpdate("recordWinnerReturningCount", updated),
 							"int reports the single affected item"),
-					() -> assertEquals(updated, executeModifying("recordWinnerReturningEntity", updated),
+					() -> assertEquals(updated, executeUpdate("recordWinnerReturningEntity", updated),
 							"an entity return type hands back the updated item"));
 		}
 
 		@Test
-		@DisplayName("a modifying method still reaches the update with its resolved keys")
-		void aModifyingMethodStillReachesTheUpdateWithItsResolvedKeys() throws NoSuchMethodException {
+		@DisplayName("an update method still reaches the update with its resolved keys")
+		void anUpdateMethodStillReachesTheUpdateWithItsResolvedKeys() throws NoSuchMethodException {
 			PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
 			operations.scriptedUpdatedEntity = new Match();
 			StringBasedDynamoDbQuery query = stringQuery(operations, MatchRepository.class,
@@ -246,6 +253,30 @@ class QueryExecutionContractTest {
 		}
 
 		@Test
+		@DisplayName("a strongly consistent GSI query is rejected at bootstrap")
+		void aStronglyConsistentGsiQueryIsRejectedAtBootstrap() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> queryMethod(RejectedRepository.class, "findConsistentlyOnGsi", String.class));
+			assertTrue(ex.getMessage().contains("eventually consistent"));
+		}
+
+		@Test
+		@DisplayName("unsupported derived query keywords are rejected at bootstrap")
+		void unsupportedDerivedQueryKeywordsAreRejectedAtBootstrap() {
+			assertDerivedKeywordRejected("deleteByPk", "Delete");
+			assertDerivedKeywordRejected("findDistinctByPk", "Distinct");
+			assertDerivedKeywordRejected("findByRegionIgnoreCase", "IgnoreCase");
+		}
+
+		private void assertDerivedKeywordRejected(String methodName, String expectedMessage) {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class, () -> {
+				DynamoDbQueryMethod method = queryMethod(RejectedRepository.class, methodName, String.class);
+				new PartTreeDynamoDbQuery(method, operations());
+			});
+			assertTrue(ex.getMessage().contains(expectedMessage));
+		}
+
+		@Test
 		@DisplayName("a derived Top limit combined with a Limit parameter is rejected at bootstrap")
 		void aDerivedTopLimitCombinedWithALimitParameterIsRejectedAtBootstrap() {
 			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
@@ -254,12 +285,21 @@ class QueryExecutionContractTest {
 		}
 
 		@Test
-		@DisplayName("a modifying method with an unsupported return type is rejected at bootstrap")
-		void aModifyingMethodWithAnUnsupportedReturnTypeIsRejectedAtBootstrap() {
+		@DisplayName("an update method with an unsupported return type is rejected at bootstrap")
+		void anUpdateMethodWithAnUnsupportedReturnTypeIsRejectedAtBootstrap() {
 			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
 					() -> queryMethod(RejectedRepository.class, "recordWinnerReturningNonsense", String.class,
 							String.class, String.class));
-			assertTrue(ex.getMessage().contains("@Modifying"), "the message must name the annotation at fault");
+			assertTrue(ex.getMessage().contains("@Update"), "the message must name the annotation at fault");
+		}
+
+		@Test
+		@DisplayName("@Query and @Update are rejected on the same method")
+		void queryAndUpdateAreMutuallyExclusive() {
+			InvalidDataAccessApiUsageException ex = assertThrows(InvalidDataAccessApiUsageException.class,
+					() -> queryMethod(RejectedRepository.class, "queryAndUpdate", String.class, String.class,
+							String.class));
+			assertTrue(ex.getMessage().contains("mutually exclusive"));
 		}
 	}
 
@@ -310,7 +350,7 @@ class QueryExecutionContractTest {
 	private static final String PK_TOURNAMENT = "TOURNAMENT#winter2026";
 
 	@Nullable
-	private Object executeModifying(String methodName, Match updated) throws NoSuchMethodException {
+	private Object executeUpdate(String methodName, Match updated) throws NoSuchMethodException {
 		PartTreeDynamoDbQueryReplayTest.CapturingOperations operations = operations();
 		operations.scriptedUpdatedEntity = updated;
 		StringBasedDynamoDbQuery query = stringQuery(operations, MatchRepository.class, methodName, String.class,

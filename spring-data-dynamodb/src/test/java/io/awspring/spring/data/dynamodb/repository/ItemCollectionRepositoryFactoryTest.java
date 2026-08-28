@@ -24,11 +24,11 @@ import static org.mockito.Mockito.when;
 
 import io.awspring.spring.data.dynamodb.core.DynamoDbOperations;
 import io.awspring.spring.data.dynamodb.core.converter.DynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
@@ -40,8 +40,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.context.MappingContext;
 
-@DisplayName("AggregateRepositoryFactory")
-class AggregateRepositoryFactoryTest {
+@DisplayName("ItemCollectionRepositoryFactory")
+class ItemCollectionRepositoryFactoryTest {
 
 	private static final String TABLE_NAME = "commerce";
 
@@ -63,15 +63,15 @@ class AggregateRepositoryFactoryTest {
 		String sku;
 	}
 
-	@AggregateTable(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
-	static class OrderAggregate {
-		@AggregateItem(regex = "ORDER#[^#]+")
+	@ItemCollectionView(tableName = TABLE_NAME, partitionKey = "pk", sortKey = "sk")
+	static class OrderItemCollection {
+		@ItemCollectionMember(regex = "ORDER#[^#]+")
 		OrderRow order;
-		@AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+")
+		@ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+")
 		List<LineRow> lines;
 	}
 
-	interface OrderAggregateRepository extends AggregateRepository<OrderAggregate> {
+	interface OrderItemCollectionRepository extends ItemCollectionRepository<OrderItemCollection> {
 	}
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
@@ -90,19 +90,19 @@ class AggregateRepositoryFactoryTest {
 	}
 
 	@Nested
-	@DisplayName("AggregateRepository bootstrap")
+	@DisplayName("ItemCollectionRepository bootstrap")
 	class BootstrapTests {
 
 		@Test
-		@DisplayName("bootstraps without throwing despite no id property on the aggregate type")
-		void factoryBuildsAggregateRepositoryWithoutIdPropertyError() {
+		@DisplayName("bootstraps without throwing despite no id property on the view type")
+		void factoryBuildsItemCollectionRepositoryWithoutIdPropertyError() {
 			// Arrange
 			DynamoDbRepositoryFactory factory = factory();
 
 			// Act
-			OrderAggregateRepository repository = Assertions.assertDoesNotThrow(
-					() -> factory.getRepository(OrderAggregateRepository.class),
-					"An AggregateRepository-derived interface must bootstrap despite its aggregate domain "
+			OrderItemCollectionRepository repository = Assertions.assertDoesNotThrow(
+					() -> factory.getRepository(OrderItemCollectionRepository.class),
+					"An ItemCollectionRepository-derived interface must bootstrap despite its view domain "
 							+ "type having no base-table id property");
 
 			// Assert
@@ -111,23 +111,22 @@ class AggregateRepositoryFactoryTest {
 	}
 
 	@Nested
-	@DisplayName("Aggregate entity information")
+	@DisplayName("ItemCollection entity information")
 	class EntityInformationTests {
 
 		@Test
 		@DisplayName("reports no id attribute, Void id type, and correct table name")
-		void aggregateEntityInformationHasNoIdAndReportsVoidIdType() {
+		void viewEntityInformationHasNoIdAndReportsVoidIdType() {
 			// Arrange
 			DynamoDbRepositoryFactory factory = factory();
 
 			// Act
-			DynamoDbEntityInformation<OrderAggregate, Object> info = factory.getEntityInformation(OrderAggregate.class,
-					false);
+			DynamoDbEntityInformation<OrderItemCollection, Object> info = factory
+					.getEntityInformation(OrderItemCollection.class, false);
 
 			// Assert
-			assertAll(() -> assertNull(info.getIdAttribute(), "An aggregate domain type has no id attribute"),
-					() -> assertEquals(Void.class, info.getIdType(),
-							"An id-less aggregate reports Void as its id type"),
+			assertAll(() -> assertNull(info.getIdAttribute(), "An view domain type has no id attribute"),
+					() -> assertEquals(Void.class, info.getIdType(), "An id-less view reports Void as its id type"),
 					() -> assertEquals(TABLE_NAME, info.getTableName()));
 		}
 	}

@@ -22,12 +22,20 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+/**
+ * Maps an expression name placeholder to a DynamoDB attribute.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ANNOTATION_TYPE)
 @Documented
 public @interface ExpressionName {
 
+	/** @return the expression placeholder, including its leading {@code #} */
 	String name();
 
+	/** @return the physical DynamoDB attribute name */
 	String value();
 }

@@ -17,20 +17,39 @@ package io.awspring.spring.data.dynamodb.core.mapping;
 
 import java.lang.annotation.*;
 
+/**
+ * Marks a property as a sort-key component.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Retention(value = RetentionPolicy.RUNTIME)
 @Target(value = { ElementType.ANNOTATION_TYPE, ElementType.FIELD, ElementType.METHOD })
 @Repeatable(SortKey.List.class)
 public @interface SortKey {
 
+	/**
+	 * @return the physical attribute name, or empty to use the mapped property name
+	 */
 	String value() default "";
 
+	/**
+	 * @return the zero-based position in a composite sort key
+	 */
 	int order() default 0;
 
+	/**
+	 * Holds repeated sort-key declarations.
+	 */
 	@Documented
 	@Retention(value = RetentionPolicy.RUNTIME)
 	@Target(value = { ElementType.ANNOTATION_TYPE, ElementType.FIELD, ElementType.METHOD })
 	@interface List {
+
+		/**
+		 * @return the sort-key declarations
+		 */
 		SortKey[] value();
 	}
 }

@@ -26,16 +26,6 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.util.Assert;
 
 /**
- * Maps a {@link DynamoDbQuerySpec} onto the request objects the {@code core} layer understands.
- * <p>
- * A spec is produced by either the derived-query creator or the {@code @Query} escape hatch; this mapper is the single
- * place that turns it into a {@link DynamoDbQueryRequest}, a {@link DynamoDbScanRequest} or a populated
- * {@link IndexQueryBuilder}, keeping the execution classes free of request-assembly detail.
- *
- * @author Matej Nedic
- * @since 1.0.0
- */
-/**
  * @author Matej Nedic
  * @since 1.0.0
  */

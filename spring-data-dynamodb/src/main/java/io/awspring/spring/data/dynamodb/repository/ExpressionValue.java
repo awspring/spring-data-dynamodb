@@ -22,12 +22,20 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+/**
+ * Supplies a constant value for a DynamoDB expression placeholder.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ANNOTATION_TYPE)
 @Documented
 public @interface ExpressionValue {
 
+	/** @return the expression placeholder, including its leading {@code :} */
 	String name();
 
+	/** @return the SpEL expression that produces the value */
 	String value();
 }

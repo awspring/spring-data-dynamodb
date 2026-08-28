@@ -28,23 +28,19 @@ public interface DynamoDbPersistentEntity<T> extends PersistentEntity<T, DynamoD
 
 	IndexKeySchema getKeySchema();
 
-	String getTypeName();
-
-	String getDiscriminatorColumn();
-
 	boolean isSecondaryIndexView();
 
 	@Nullable
 	String getIndexName();
 
-	boolean isAggregateView();
+	boolean isItemCollectionView();
 
 	@Nullable
-	String getAggregatePartitionKeyColumn();
+	String getItemCollectionPartitionKeyColumn();
 
 	@Nullable
-	String getAggregateSortKeyColumn();
+	String getItemCollectionSortKeyColumn();
 
 	@Nullable
-	String getAggregateIndexName();
+	String getItemCollectionIndexName();
 }

@@ -22,10 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-class AggregateTableTest {
+class ItemCollectionViewTest {
 
 	private static final String ORDER_PK = "ORDER#9876";
 	private static final String ORDER_SK = "ORDER#9876";
@@ -88,19 +88,19 @@ class AggregateTableTest {
 	}
 
 	@Nested
-	@DisplayName("ReadAggregate")
-	class ReadAggregate {
+	@DisplayName("ReadItemCollection")
+	class ReadItemCollection {
 
 		@Test
-		@DisplayName("root and line items fold into a typed aggregate")
-		void readAggregate_withRootAndLines_foldsIntoAggregate() {
+		@DisplayName("root and line items fold into a typed view")
+		void readItemCollection_withRootAndLines_foldsIntoItemCollection() {
 			List<Map<String, AttributeValue>> items = new ArrayList<>();
 			items.add(item(ORDER_PK, ORDER_SK, Map.of("status", STATUS_PLACED)));
 			items.add(item(ORDER_PK, LINE_A_SK, Map.of("sku", SKU_WIDGET_1)));
 			items.add(item(ORDER_PK, LINE_B_SK, Map.of("sku", SKU_WIDGET_2)));
 
 			DynamoDbPersistentEntity<Order> entity = requiredEntity(Order.class);
-			Order order = converter.readAggregate(items, entity);
+			Order order = converter.readItemCollection(items, entity);
 
 			assertAll(() -> assertEquals(STATUS_PLACED, order.order.status), () -> assertEquals(2, order.lines.size()),
 					() -> assertEquals(SKU_WIDGET_1, order.lines.get(0).sku),
@@ -109,26 +109,26 @@ class AggregateTableTest {
 
 		@Test
 		@DisplayName("root member with no match resolves to null")
-		void readAggregate_noRootMatch_rootIsNull() {
+		void readItemCollection_noRootMatch_rootIsNull() {
 			List<Map<String, AttributeValue>> items = new ArrayList<>();
 			items.add(item(ORDER_PK, LINE_A_SK, Map.of("sku", SKU_WIDGET_1)));
 
 			DynamoDbPersistentEntity<Order> entity = requiredEntity(Order.class);
-			Order order = converter.readAggregate(items, entity);
+			Order order = converter.readItemCollection(items, entity);
 
 			assertAll(() -> assertNull(order.order), () -> assertEquals(1, order.lines.size()));
 		}
 
 		@Test
 		@DisplayName("second match on a single-valued member is rejected")
-		void readAggregate_duplicateRoot_throws() {
+		void readItemCollection_duplicateRoot_throws() {
 			List<Map<String, AttributeValue>> items = new ArrayList<>();
 			items.add(item(ORDER_PK, ORDER_SK, Map.of("status", STATUS_PLACED)));
 			items.add(item(ORDER_PK, "ORDER#1234", Map.of("status", STATUS_PLACED)));
 
 			DynamoDbPersistentEntity<Order> entity = requiredEntity(Order.class);
 
-			assertThrows(IllegalStateException.class, () -> converter.readAggregate(items, entity));
+			assertThrows(IllegalStateException.class, () -> converter.readItemCollection(items, entity));
 		}
 	}
 
@@ -146,12 +146,12 @@ class AggregateTableTest {
 		}
 
 		@Test
-		@DisplayName("no @AggregateItem members is rejected")
+		@DisplayName("no @ItemCollectionMember members is rejected")
 		void bootstrap_noChildren_throws() {
 			MappingException exception = assertThrows(MappingException.class,
 					() -> new DynamoDbMappingContext().getRequiredPersistentEntity(NoChildren.class));
 
-			assertBootstrapMessageContains(exception, "must declare at least one @AggregateItem member");
+			assertBootstrapMessageContains(exception, "must declare at least one @ItemCollectionMember member");
 		}
 
 		@Test
@@ -164,42 +164,54 @@ class AggregateTableTest {
 		}
 
 		@Test
-		@DisplayName("base-table aggregate with blank sort key is rejected")
+		@DisplayName("member projection type without @Table bootstraps and materializes")
+		void bootstrap_nonTableChild_succeeds() {
+			DynamoDbPersistentEntity<NonTableChild> entity = requiredEntity(NonTableChild.class);
+			NonTableChild view = converter.readItemCollection(List.of(item(ORDER_PK, "X", Map.of("value", "plain"))),
+					entity);
+
+			assertAll(() -> assertTrue(entity.isItemCollectionView()),
+					() -> assertEquals("plain", view.notATableEntity.value));
+		}
+
+		@Test
+		@DisplayName("base-table view with blank sort key is rejected")
 		void bootstrap_baseTableBlankSortKey_throws() {
 			MappingException exception = assertThrows(MappingException.class,
 					() -> new DynamoDbMappingContext().getRequiredPersistentEntity(BaseTableBlankSortKey.class));
 
-			assertBootstrapMessageContains(exception, "sortKey() must not be blank for a base-table aggregate");
+			assertBootstrapMessageContains(exception,
+					"sortKey() must not be blank for a base-table item-collection view");
 		}
 	}
 
 	@Nested
-	@DisplayName("GsiScopedAggregate")
-	class GsiScopedAggregate {
+	@DisplayName("GsiScopedItemCollection")
+	class GsiScopedItemCollection {
 
 		@Test
-		@DisplayName("GSI aggregate with per-member sort keys bootstraps cleanly")
+		@DisplayName("GSI view with per-member sort keys bootstraps cleanly")
 		void bootstrap_gsiWithMemberSortKeys_succeeds() {
 			DynamoDbPersistentEntity<GsiScopedWithMemberSortKeys> entity = requiredEntity(
 					GsiScopedWithMemberSortKeys.class);
 
-			assertAll(() -> assertTrue(entity.isAggregateView()),
-					() -> assertEquals("GSI1", entity.getAggregateIndexName()),
-					() -> assertEquals("", entity.getAggregateSortKeyColumn()));
+			assertAll(() -> assertTrue(entity.isItemCollectionView()),
+					() -> assertEquals("GSI1", entity.getItemCollectionIndexName()),
+					() -> assertEquals("", entity.getItemCollectionSortKeyColumn()));
 		}
 
 		@Test
-		@DisplayName("GSI aggregate with blank sort key and member missing its own sort key is rejected")
+		@DisplayName("GSI view with blank sort key and member missing its own sort key is rejected")
 		void bootstrap_gsiMissingMemberSortKey_throws() {
 			MappingException exception = assertThrows(MappingException.class, () -> new DynamoDbMappingContext()
 					.getRequiredPersistentEntity(GsiScopedMissingMemberSortKey.class));
 
-			assertBootstrapMessageContains(exception, "must declare its own @AggregateItem.sortKey()");
+			assertBootstrapMessageContains(exception, "must declare its own @ItemCollectionMember.sortKey()");
 		}
 
 		@Test
-		@DisplayName("GSI aggregate folds using per-member sort key column")
-		void readAggregate_gsiPerMemberSortKey_foldsCorrectly() {
+		@DisplayName("GSI view folds using per-member sort key column")
+		void readItemCollection_gsiPerMemberSortKey_foldsCorrectly() {
 			List<Map<String, AttributeValue>> items = new ArrayList<>();
 			Map<String, AttributeValue> orderItem = new HashMap<>();
 			orderItem.put("gsi1pk", AttributeValue.builder().s(GSI1PK_VALUE).build());
@@ -209,9 +221,9 @@ class AggregateTableTest {
 
 			DynamoDbPersistentEntity<GsiScopedWithMemberSortKeys> entity = requiredEntity(
 					GsiScopedWithMemberSortKeys.class);
-			GsiScopedWithMemberSortKeys aggregate = converter.readAggregate(items, entity);
+			GsiScopedWithMemberSortKeys view = converter.readItemCollection(items, entity);
 
-			assertEquals(STATUS_PLACED, aggregate.order.status);
+			assertEquals(STATUS_PLACED, view.order.status);
 		}
 	}
 
@@ -241,27 +253,27 @@ class AggregateTableTest {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
 	public static class Order {
-		@AggregateItem(regex = "ORDER#[^#]+")
+		@ItemCollectionMember(regex = "ORDER#[^#]+")
 		OrderRow order;
-		@AggregateItem(regex = "ORDER#[^#]+#LINE#[^#]+")
+		@ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+")
 		List<LineRow> lines;
 
 		public Order() {
 		}
 	}
 
-	@AggregateTable(tableName = "", partitionKey = "pk", sortKey = "sk")
+	@ItemCollectionView(tableName = "", partitionKey = "pk", sortKey = "sk")
 	static class BlankTableName {
-		@AggregateItem(regex = "X")
+		@ItemCollectionMember(regex = "X")
 		OrderRow order;
 
 		public BlankTableName() {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
 	static class NoChildren {
 		String notAChildMember;
 
@@ -269,38 +281,38 @@ class AggregateTableTest {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
 	static class UnroutedChildren {
-		@AggregateItem
+		@ItemCollectionMember
 		OrderRow order;
 
 		public UnroutedChildren() {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "pk")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "pk")
 	static class BaseTableBlankSortKey {
-		@AggregateItem(regex = "ORDER#[^#]+")
+		@ItemCollectionMember(regex = "ORDER#[^#]+")
 		OrderRow order;
 
 		public BaseTableBlankSortKey() {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "gsi1pk", indexName = "GSI1")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "gsi1pk", indexName = "GSI1")
 	static class GsiScopedWithMemberSortKeys {
-		@AggregateItem(regex = "ORDER#[^#]+", sortKey = "gsi1sk")
+		@ItemCollectionMember(regex = "ORDER#[^#]+", sortKey = "gsi1sk")
 		OrderRow order;
 
 		public GsiScopedWithMemberSortKeys() {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "gsi1pk", indexName = "GSI1")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "gsi1pk", indexName = "GSI1")
 	static class GsiScopedMissingMemberSortKey {
-		@AggregateItem(regex = "ORDER#[^#]+", sortKey = "gsi1sk")
+		@ItemCollectionMember(regex = "ORDER#[^#]+", sortKey = "gsi1sk")
 		OrderRow order;
-		@AggregateItem(regex = "ITEM#[^#]+")
+		@ItemCollectionMember(regex = "ITEM#[^#]+")
 		List<LineRow> lines;
 
 		public GsiScopedMissingMemberSortKey() {
@@ -314,9 +326,9 @@ class AggregateTableTest {
 		}
 	}
 
-	@AggregateTable(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
+	@ItemCollectionView(tableName = "commerce", partitionKey = "pk", sortKey = "sk")
 	static class NonTableChild {
-		@AggregateItem(regex = "X")
+		@ItemCollectionMember(regex = "X")
 		PlainPojo notATableEntity;
 
 		public NonTableChild() {

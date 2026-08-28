@@ -16,6 +16,8 @@
 package io.awspring.spring.data.dynamodb.core;
 
 /**
+ * Successful write result containing the resulting entity.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

@@ -13,11 +13,12 @@ the API keeps DynamoDB's `(partition key, sort key)` modeling explicit rather th
 - [Reference Guide](src/main/content/reference.md) — the complete guide, covering:
   - Getting started (dependencies, configuration, table creation)
   - Mapping entities (`@Table`, `@PartitionKey`, `@SortKey`, `@Column`, `@Version`, `@InnerClass`,
-    `@SortKeyTemplate`, `@AggregateTable`, discriminators)
-  - Secondary index views (typed and polymorphic, multi-attribute keys, LSIs)
+    `@SortKeyTemplate`, `@ItemCollectionView`, `@ItemCollectionMember`)
+  - Secondary index views (typed views, multi-attribute keys, LSIs)
   - Repositories (`DynamoDbRepository`, composite ids, `SecondaryIndexRepository`,
-    `AggregateRepository`, derived queries, `@AllowScan`, `findFirst`/`findTop`, pagination)
-  - `@Query` — explicit key conditions, filter expressions, `@Modifying` updates, and PartiQL
+    `ItemCollectionRepository`, derived queries, `@AllowScan`, `findFirst`/`findTop`, pagination)
+  - `@Query` — explicit key conditions, filter expressions, and PartiQL
+  - `@Update` — single-item update and condition expressions
 
 ## Building the docs
 
@@ -27,12 +28,20 @@ module only — it produces no deployable Maven artifact (both `install` and `de
 From the repository root:
 
 ```bash
+# Build the reference guide and aggregated API documentation
+make docs
+
 # Validate the whole reactor, including this module
 mvn validate
 
 # Build everything except the docs module
 mvn -pl spring-data-dynamodb -am install
 ```
+
+The rendered reference guide is written to
+`target/generated-docs/reference/html/reference.html` (relative to this module), and the aggregated
+API documentation is written to `../target/site/apidocs/index.html`. The build checks formatting
+without applying changes.
 
 ## Layout
 

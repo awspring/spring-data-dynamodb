@@ -21,6 +21,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+/**
+ * Allows a derived repository query to execute as a DynamoDB scan.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
 @Documented

@@ -19,6 +19,8 @@ import org.springframework.data.repository.ListCrudRepository;
 import org.springframework.data.repository.NoRepositoryBean;
 
 /**
+ * CRUD repository for DynamoDB table entities.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -37,5 +39,6 @@ public interface DynamoDbRepository<T, ID> extends ListCrudRepository<T, ID> {
 
 	void deleteAll();
 
+	/** Updates an existing item from the supplied entity state. */
 	<S extends T> S update(S entity);
 }

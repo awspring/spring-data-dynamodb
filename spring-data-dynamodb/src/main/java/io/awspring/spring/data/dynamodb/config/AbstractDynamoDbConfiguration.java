@@ -39,6 +39,8 @@ import org.springframework.util.Assert;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
 /**
+ * Base Spring configuration for DynamoDB mapping and template beans.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -48,6 +50,7 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 	private @Nullable ClassLoader beanClassLoader;
 	private @Nullable BeanFactory beanFactory;
 
+	/** @return the entity converter */
 	@Bean
 	public DynamoDbConverter dynamoDbConverter(DynamoDbMappingContext dynamoDbMappingContext,
 			DynamoDbConversions dynamoDbConversions, PropertyValueConversions propertyValueConversions) {
@@ -59,11 +62,13 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		return converter;
 	}
 
+	/** @return the default DynamoDB exception translator */
 	@Bean
 	public DynamoDbExceptionTranslator dynamoDbExceptionTranslator() {
 		return new DefaultDynamoDbExceptionTranslator();
 	}
 
+	/** @return the configured DynamoDB template */
 	@Bean
 	public DynamoDbTemplate dynamoDbTemplate(DynamoDbClient dynamoDbClient, DynamoDbConverter dynamoDbConverter,
 			DynamoDbExceptionTranslator dynamoDbExceptionTranslator) {
@@ -72,11 +77,13 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		return template;
 	}
 
+	/** @return the AWS SDK DynamoDB client; override to configure region and credentials */
 	@Bean
 	public DynamoDbClient dynamoDbClient() {
 		return DynamoDbClient.builder().build();
 	}
 
+	/** @return the configured mapping context */
 	@Bean
 	public DynamoDbMappingContext dynamoDbMappingContext(DynamoDbConversions dynamoDbConversions)
 			throws ClassNotFoundException {
@@ -90,15 +97,18 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		return mappingContext;
 	}
 
+	/** @return custom converters added to the mapping conversion service */
 	protected List<?> customConverters() {
 		return Collections.emptyList();
 	}
 
+	/** @return the configured DynamoDB custom conversions */
 	@Bean
 	public DynamoDbConversions customConversions() {
 		return new DynamoDbConversions(customConverters());
 	}
 
+	/** @return per-property value conversions */
 	@Bean
 	public PropertyValueConversions propertyValueConversions() {
 		return PropertyValueConversions.simple(registrar -> {
@@ -110,6 +120,7 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		this.beanClassLoader = classLoader;
 	}
 
+	/** Returns a required bean from this configuration's bean factory. */
 	protected <T> T requireBeanOfType(@NonNull Class<T> beanType) {
 		return getBeanFactory().getBean(beanType);
 	}
@@ -119,6 +130,7 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		this.beanFactory = beanFactory;
 	}
 
+	/** @return the initialized bean factory */
 	protected @NonNull BeanFactory getBeanFactory() {
 
 		Assert.state(this.beanFactory != null, "BeanFactory not initialized");
@@ -126,14 +138,17 @@ public abstract class AbstractDynamoDbConfiguration implements BeanClassLoaderAw
 		return this.beanFactory;
 	}
 
+	/** @return the configured bean class loader, if available */
 	protected Optional<ClassLoader> getBeanClassLoader() {
 		return Optional.ofNullable(this.beanClassLoader);
 	}
 
+	/** @return entity classes discovered in the configured base packages */
 	protected Set<Class<?>> getInitialEntitySet() throws ClassNotFoundException {
 		return DynamoDbEntityClassScanner.scan(getEntityBasePackages());
 	}
 
+	/** @return packages scanned for mapped entity classes */
 	protected String[] getEntityBasePackages() {
 		return new String[] { getClass().getPackage().getName() };
 	}

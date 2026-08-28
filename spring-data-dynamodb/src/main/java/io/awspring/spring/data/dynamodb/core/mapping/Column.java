@@ -17,12 +17,24 @@ package io.awspring.spring.data.dynamodb.core.mapping;
 
 import java.lang.annotation.*;
 
+/**
+ * Maps a property to a DynamoDB attribute.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(value = { ElementType.ANNOTATION_TYPE, ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER })
 public @interface Column {
 
+	/**
+	 * @return the physical attribute name
+	 */
 	String value() default "";
 
+	/**
+	 * @return whether the property is excluded from normal persistence
+	 */
 	boolean isStatic() default false;
 }

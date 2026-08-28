@@ -25,10 +25,10 @@ import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
 import io.awspring.spring.data.dynamodb.core.DynamoDbTemplate;
 import io.awspring.spring.data.dynamodb.core.EntityQueryResult;
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
 import io.awspring.spring.data.dynamodb.core.mapping.Column;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbMappingContext;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
@@ -58,7 +58,7 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 
-	private static final String TABLE_NAME = "arena_aggregate";
+	private static final String TABLE_NAME = "arena_view";
 	private static final String GSI_NAME = "GSI1";
 	private static final String TOURNAMENT_PK = "TOURNAMENT#1";
 	private static final String TOURNAMENT_NAME = "Winter Championship";
@@ -330,16 +330,16 @@ public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 		}
 	}
 
-	@AggregateTable(tableName = TABLE_NAME, indexName = GSI_NAME, partitionKey = "gsi1pk", sortKey = "gsi1sk")
-	public static class TournamentAggregate {
+	@ItemCollectionView(tableName = TABLE_NAME, indexName = GSI_NAME, partitionKey = "gsi1pk", sortKey = "gsi1sk")
+	public static class TournamentItemCollection {
 
-		@AggregateItem(regex = "TOURNAMENT#[^#]+")
+		@ItemCollectionMember(regex = "TOURNAMENT#[^#]+")
 		private TournamentData tournament;
 
-		@AggregateItem(regex = "PLAYER#[^#]+")
+		@ItemCollectionMember(regex = "PLAYER#[^#]+")
 		private List<PlayerData> players;
 
-		@AggregateItem(regex = "MATCH#[^#]+")
+		@ItemCollectionMember(regex = "MATCH#[^#]+")
 		private List<MatchData> matches;
 
 		public TournamentData getTournament() {
@@ -356,41 +356,39 @@ public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 	}
 
 	@Nested
-	@DisplayName("Aggregate reading from GSI")
-	class AggregateReading {
+	@DisplayName("ItemCollection reading from GSI")
+	class ItemCollectionReading {
 
 		@Test
-		@DisplayName("reads heterogeneous rows from a GSI and routes them into typed aggregate slots")
-		void queryAggregate_fullPartition_routesAllRowTypes() {
+		@DisplayName("reads heterogeneous rows from a GSI and routes them into typed view slots")
+		void queryItemCollection_fullPartition_routesAllRowTypes() {
 			seedFullTournament();
 
-			EntityQueryResult<TournamentAggregate> result = dynamoDbTemplate.queryAggregate(TournamentAggregate.class,
-					tournamentQuery(), null);
-			TournamentAggregate aggregate = result.getEntity();
+			EntityQueryResult<TournamentItemCollection> result = dynamoDbTemplate
+					.queryItemCollection(TournamentItemCollection.class, tournamentQuery(), null);
+			TournamentItemCollection view = result.getEntity();
 
-			assertAll("full tournament aggregate from GSI", () -> assertNotNull(aggregate),
-					() -> assertEquals(TOURNAMENT_PK, aggregate.getTournament().sortKey),
-					() -> assertEquals(TOURNAMENT_NAME, aggregate.getTournament().getName()),
-					() -> assertEquals(2, aggregate.getPlayers().size()),
-					() -> assertEquals(2, aggregate.getMatches().size()),
-					() -> assertEquals(PLAYER_ALICE, aggregate.getPlayers().get(1).getName()),
-					() -> assertEquals(PLAYER_BOB, aggregate.getPlayers().get(0).getName()));
+			assertAll("full tournament view from GSI", () -> assertNotNull(view),
+					() -> assertEquals(TOURNAMENT_PK, view.getTournament().sortKey),
+					() -> assertEquals(TOURNAMENT_NAME, view.getTournament().getName()),
+					() -> assertEquals(2, view.getPlayers().size()), () -> assertEquals(2, view.getMatches().size()),
+					() -> assertEquals(PLAYER_ALICE, view.getPlayers().get(0).getName()),
+					() -> assertEquals(PLAYER_BOB, view.getPlayers().get(1).getName()));
 		}
 
 		@Test
-		@DisplayName("uses the GSI sort key (not the base-table SK) for aggregate item matching")
-		void queryAggregate_partialPartition_matchesOnGsiSortKey() {
+		@DisplayName("uses the GSI sort key (not the base-table SK) for view item matching")
+		void queryItemCollection_partialPartition_matchesOnGsiSortKey() {
 			dynamoDbTemplate.save(ArenaItem.player("1", "p1", PLAYER_ALICE));
 			dynamoDbTemplate.save(ArenaItem.match("1", "m1", "SEMIFINAL"));
 
-			TournamentAggregate aggregate = dynamoDbTemplate
-					.queryAggregate(TournamentAggregate.class, tournamentQuery(), null).getEntity();
+			TournamentItemCollection view = dynamoDbTemplate
+					.queryItemCollection(TournamentItemCollection.class, tournamentQuery(), null).getEntity();
 
-			assertAll("partial aggregate routing by GSI sort key", () -> assertNull(aggregate.getTournament()),
-					() -> assertEquals(1, aggregate.getPlayers().size()),
-					() -> assertEquals(1, aggregate.getMatches().size()),
-					() -> assertEquals(PLAYER_ALICE, aggregate.getPlayers().get(0).getName()),
-					() -> assertEquals("m1", aggregate.getMatches().get(0).getMatchId()));
+			assertAll("partial view routing by GSI sort key", () -> assertNull(view.getTournament()),
+					() -> assertEquals(1, view.getPlayers().size()), () -> assertEquals(1, view.getMatches().size()),
+					() -> assertEquals(PLAYER_ALICE, view.getPlayers().get(0).getName()),
+					() -> assertEquals("m1", view.getMatches().get(0).getMatchId()));
 		}
 	}
 
@@ -399,19 +397,18 @@ public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 	class SortKeyIndependence {
 
 		@Test
-		@DisplayName("base-table SK can differ from GSI SK without affecting aggregate routing")
-		void queryAggregate_divergentBaseAndGsiSk_routesCorrectly() {
+		@DisplayName("base-table SK can differ from GSI SK without affecting view routing")
+		void queryItemCollection_divergentBaseAndGsiSk_routesCorrectly() {
 			ArenaItem item = ArenaItem.match("1", "m1", "SEMIFINAL");
 			item.sk = "BASE#SOMETHING";
 			item.gsi1sk = "MATCH#m1";
 			dynamoDbTemplate.save(item);
 
-			TournamentAggregate aggregate = dynamoDbTemplate
-					.queryAggregate(TournamentAggregate.class, tournamentQuery(), null).getEntity();
+			TournamentItemCollection view = dynamoDbTemplate
+					.queryItemCollection(TournamentItemCollection.class, tournamentQuery(), null).getEntity();
 
-			assertAll("aggregate routes on GSI SK, not base-table SK",
-					() -> assertEquals(1, aggregate.getMatches().size()),
-					() -> assertEquals("m1", aggregate.getMatches().get(0).getMatchId()));
+			assertAll("view routes on GSI SK, not base-table SK", () -> assertEquals(1, view.getMatches().size()),
+					() -> assertEquals("m1", view.getMatches().get(0).getMatchId()));
 		}
 	}
 
@@ -420,11 +417,11 @@ public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 	class ReadOnlyEnforcement {
 
 		@Test
-		@DisplayName("saving an @AggregateTable entity throws InvalidDataAccessApiUsageException")
-		void save_aggregateTable_throwsException() {
-			TournamentAggregate aggregate = new TournamentAggregate();
+		@DisplayName("saving an @ItemCollectionView entity throws InvalidDataAccessApiUsageException")
+		void save_viewTable_throwsException() {
+			TournamentItemCollection view = new TournamentItemCollection();
 
-			assertThrows(InvalidDataAccessApiUsageException.class, () -> dynamoDbTemplate.save(aggregate));
+			assertThrows(InvalidDataAccessApiUsageException.class, () -> dynamoDbTemplate.save(view));
 		}
 	}
 }

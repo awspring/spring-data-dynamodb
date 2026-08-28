@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import org.springframework.data.convert.CustomConversions;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
 
@@ -31,11 +32,13 @@ public class DynamoDbConversions extends CustomConversions {
 	private static final StoreConversions STORE_CONVERSIONS;
 	private static final List<Object> STORE_CONVERTERS;
 
+	private static final SimpleTypeHolder DYNAMODB_SIMPLE_TYPES = new SimpleTypeHolder(Set.of(Number.class), true);
+
 	static {
 		List<Object> converters = new ArrayList<>(DynamoDbConverters.getConvertersToRegister());
 		STORE_CONVERTERS = Collections.unmodifiableList(converters);
 
-		STORE_CONVERSIONS = StoreConversions.of(SimpleTypeHolder.DEFAULT, STORE_CONVERTERS);
+		STORE_CONVERSIONS = StoreConversions.of(DYNAMODB_SIMPLE_TYPES, STORE_CONVERTERS);
 	}
 
 	public DynamoDbConversions(List<?> converters) {

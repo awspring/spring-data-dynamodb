@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mapping.MappingException;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate;
 
 class MappingDynamoDbConverterTest {
 
@@ -76,6 +77,23 @@ class MappingDynamoDbConverterTest {
 	@Nested
 	@DisplayName("InnerClass chaining")
 	class InnerClassChaining {
+
+		@Test
+		@DisplayName("null flattened @InnerClass update clears every nested column")
+		void nullFlattenedInnerClassUpdateClearsEveryNestedColumn() {
+			ChainOuter outer = new ChainOuter();
+			outer.setId("o1");
+			outer.setMiddle(null);
+			Map<String, AttributeValue> keys = new HashMap<>();
+			Map<String, AttributeValueUpdate> updates = new HashMap<>();
+
+			converter.update(outer, keys, mappingContext.getRequiredPersistentEntity(ChainOuter.class), updates);
+
+			assertAll(() -> assertEquals("o1", keys.get("id").s()),
+					() -> assertTrue(updates.get("middleName").value().nul()),
+					() -> assertTrue(updates.get("leafValue").value().nul()),
+					() -> assertFalse(updates.containsKey("middle")), () -> assertFalse(updates.containsKey("leaf")));
+		}
 
 		@Test
 		@DisplayName("Chained @InnerClass flattens all levels and reconstructs on read")

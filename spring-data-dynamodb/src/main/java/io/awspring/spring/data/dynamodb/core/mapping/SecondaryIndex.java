@@ -24,6 +24,12 @@ import java.lang.annotation.Target;
 import org.springframework.core.annotation.AliasFor;
 import org.springframework.data.annotation.Persistent;
 
+/**
+ * Maps a read-only entity view to a DynamoDB secondary index.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Persistent
 @Inherited
@@ -31,11 +37,20 @@ import org.springframework.data.annotation.Persistent;
 @Target(ElementType.TYPE)
 public @interface SecondaryIndex {
 
+	/**
+	 * @return the index name
+	 */
 	@AliasFor("name")
 	String value() default "";
 
+	/**
+	 * @return the index name
+	 */
 	@AliasFor("value")
 	String name() default "";
 
+	/**
+	 * @return the physical table name, or empty to resolve it from mapped table entities
+	 */
 	String tableName() default "";
 }

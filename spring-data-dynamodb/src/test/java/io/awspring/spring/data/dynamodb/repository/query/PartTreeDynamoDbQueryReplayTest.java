@@ -80,6 +80,8 @@ class PartTreeDynamoDbQueryReplayTest {
 
 		List<Match> findTop2ByTournamentId(String tournamentId);
 
+		List<Match> findTop2ByTournamentIdAndRound(String tournamentId, String round);
+
 		@AllowScan
 		List<Match> findAllowedByRound(String round);
 
@@ -223,17 +225,6 @@ class PartTreeDynamoDbQueryReplayTest {
 		}
 
 		@Override
-		public EntityQueryResult<List<Object>> queryPolymorphic(String tableName, DynamoDbQueryRequest queryRequest,
-				@Nullable DynamoDbPageRequest dynamoDBPageRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
-		}
-
-		@Override
-		public EntityQueryResult<List<Object>> scanPolymorphic(String tableName, DynamoDbScanRequest scanRequest) {
-			throw new UnsupportedOperationException("not exercised by this test");
-		}
-
-		@Override
 		public <T> EntityWriteResult<T> save(T entity) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
@@ -346,7 +337,7 @@ class PartTreeDynamoDbQueryReplayTest {
 
 		@Override
 		@Nullable
-		public <A> EntityQueryResult<A> queryAggregate(Class<A> aggregateClass, DynamoDbQueryRequest dynamoDbRequest,
+		public <A> EntityQueryResult<A> queryItemCollection(Class<A> viewClass, DynamoDbQueryRequest dynamoDbRequest,
 				DynamoDbPageRequest dynamoDBPageRequest) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
@@ -471,6 +462,26 @@ class PartTreeDynamoDbQueryReplayTest {
 		}
 
 		@Test
+		@DisplayName("unbounded List query exhausts pages after an empty filtered page")
+		void unboundedListQueryExhaustsPagesAfterAnEmptyFilteredPage() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			Map<String, Object> firstCursor = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_1);
+			Match match = new Match();
+			match.tournamentId = PARTITION_KEY_VALUE;
+			match.matchId = MATCH_ID_2;
+			match.round = ROUND_QUARTERFINAL;
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.of(), firstCursor));
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.<Object> of(match), null));
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findByTournamentIdAndRound", String.class, String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			Object result = query.execute(new Object[] { PARTITION_KEY_VALUE, ROUND_QUARTERFINAL });
+
+			assertAll(() -> assertEquals(List.of(match), result), () -> assertEquals(2, operations.queryInvocations),
+					() -> assertEquals(firstCursor, operations.lastCapturedPageRequest.getLastEvaluatedKey()));
+		}
+
+		@Test
 		@DisplayName("Partition plus non-key equality replays with a resolvable filter expression")
 		void partitionPlusNonKeyEqualityReplaysWithAResolvableFilterExpression() throws NoSuchMethodException {
 			CapturingOperations operations = newCapturingOperations();
@@ -530,6 +541,29 @@ class PartTreeDynamoDbQueryReplayTest {
 
 			assertAll(() -> assertNotNull(operations.lastCapturedPageRequest),
 					() -> assertEquals(2, operations.lastCapturedPageRequest.getLimit()));
+		}
+
+		@Test
+		@DisplayName("findTopN with a filter follows cursors until it collects N matches")
+		void findTopNWithAFilterFollowsCursorsUntilItCollectsNMatches() throws NoSuchMethodException {
+			CapturingOperations operations = newCapturingOperations();
+			Map<String, Object> firstCursor = Map.of("tournamentId", PARTITION_KEY_VALUE, "matchId", MATCH_ID_1);
+			Match first = new Match();
+			first.matchId = MATCH_ID_1;
+			Match second = new Match();
+			second.matchId = MATCH_ID_2;
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.<Object> of(first), firstCursor));
+			operations.scriptedQueryPages.add(EntityQueryResultAccess.of(List.<Object> of(second), null));
+			DynamoDbQueryMethod queryMethod = queryMethodFor("findTop2ByTournamentIdAndRound", String.class,
+					String.class);
+			PartTreeDynamoDbQuery query = new PartTreeDynamoDbQuery(queryMethod, operations);
+
+			Object result = query.execute(new Object[] { PARTITION_KEY_VALUE, ROUND_QUARTERFINAL });
+
+			assertAll(() -> assertEquals(List.of(first, second), result),
+					() -> assertEquals(2, operations.queryInvocations),
+					() -> assertEquals(firstCursor, operations.lastCapturedPageRequest.getLastEvaluatedKey()),
+					() -> assertEquals(1, operations.lastCapturedPageRequest.getLimit()));
 		}
 	}
 

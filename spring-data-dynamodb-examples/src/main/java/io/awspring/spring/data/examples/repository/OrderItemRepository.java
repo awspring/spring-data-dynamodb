@@ -15,9 +15,17 @@
  */
 package io.awspring.spring.data.examples.repository;
 
-import io.awspring.spring.data.examples.model.OrderItem;
+import io.awspring.spring.data.dynamodb.repository.AllowScan;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
+import io.awspring.spring.data.dynamodb.repository.ExpressionName;
+import io.awspring.spring.data.dynamodb.repository.Query;
+import io.awspring.spring.data.examples.model.OrderItem;
+import java.util.List;
+import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.ScrollPosition;
+import org.springframework.data.domain.Window;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -26,4 +34,15 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public interface OrderItemRepository extends DynamoDbRepository<OrderItem, DynamoDbCompositeId> {
+
+	List<OrderItem> findTop2ByPkAndOrderId(String pk, String orderId);
+
+	Window<OrderItem> findWindowByPkAndOrderId(String pk, String orderId, ScrollPosition position, Limit limit);
+
+	@AllowScan
+	@Query(filterExpression = "#name = :name", names = @ExpressionName(name = "#name", value = "productName"))
+	List<OrderItem> scanByProductName(@Param("name") String productName);
+
+	@Query(partiQl = "SELECT * FROM \"Commerce\" WHERE \"pk\" = ? AND begins_with(\"sk\", ?)")
+	List<OrderItem> findWithPartiQl(String pk, String skPrefix);
 }

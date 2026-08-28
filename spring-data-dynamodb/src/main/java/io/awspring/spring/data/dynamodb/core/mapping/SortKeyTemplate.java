@@ -22,20 +22,39 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+/**
+ * Composes and decomposes a sort key from entity properties.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
 @Repeatable(SortKeyTemplate.List.class)
 public @interface SortKeyTemplate {
 
+	/**
+	 * @return the template containing property placeholders
+	 */
 	String value();
 
+	/**
+	 * @return the target sort-key column, or empty for the entity sort key
+	 */
 	String column() default "";
 
+	/**
+	 * Holds repeated sort-key templates.
+	 */
 	@Documented
 	@Retention(RetentionPolicy.RUNTIME)
 	@Target(ElementType.TYPE)
 	@interface List {
+
+		/**
+		 * @return the sort-key templates
+		 */
 		SortKeyTemplate[] value();
 	}
 }

@@ -20,6 +20,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.InnerClass;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
+import org.springframework.data.convert.ValueConverter;
 
 /**
  * @author Matej Nedic
@@ -38,6 +39,7 @@ public class Customer {
 
 	private String username;
 
+	@ValueConverter(NormalizedEmailConverter.class)
 	private String email;
 
 	@InnerClass(serializeAsNestedMap = true)

@@ -23,6 +23,8 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
+ * Marks a property reconstructed from a sort-key template and omitted on write.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */

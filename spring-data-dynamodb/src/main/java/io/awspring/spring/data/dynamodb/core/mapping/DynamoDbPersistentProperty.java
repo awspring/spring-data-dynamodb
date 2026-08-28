@@ -38,12 +38,10 @@ public interface DynamoDbPersistentProperty
 	@Nullable
 	AnnotatedType findAnnotatedType(Class<? extends Annotation> annotationType);
 
-	boolean isEmbedded();
-
 	boolean isSpecialType();
 
 	@Nullable
-	Class getTypeOfProperty();
+	Class<?> getTypeOfProperty();
 
 	@Nullable
 	String startsWith();
@@ -58,8 +56,8 @@ public interface DynamoDbPersistentProperty
 
 	boolean isDerived();
 
-	boolean isAggregateItem();
+	boolean isItemCollectionMember();
 
 	@Nullable
-	AggregateItem getAggregateItem();
+	ItemCollectionMember getItemCollectionMember();
 }

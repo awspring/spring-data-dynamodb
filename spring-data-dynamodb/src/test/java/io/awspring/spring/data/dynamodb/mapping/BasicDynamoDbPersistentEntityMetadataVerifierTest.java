@@ -70,7 +70,7 @@ class BasicDynamoDbPersistentEntityMetadataVerifierTest {
 			Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
 			assertTrue(
 					cause.getMessage()
-							.contains("declares more than one of @Table, @SecondaryIndex and @AggregateTable"),
+							.contains("declares more than one of @Table, @SecondaryIndex and @ItemCollectionView"),
 					"Expected error to mention @Table+@SecondaryIndex conflict, got: " + cause.getMessage());
 		}
 	}

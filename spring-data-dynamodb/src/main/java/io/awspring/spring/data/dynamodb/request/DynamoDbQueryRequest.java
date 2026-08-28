@@ -18,6 +18,8 @@ package io.awspring.spring.data.dynamodb.request;
 import java.util.Map;
 
 /**
+ * Options for a low-level DynamoDB {@code Query} request.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
@@ -28,7 +30,7 @@ public class DynamoDbQueryRequest {
 	private String keyConditionExpression;
 	private Map<String, String> expressionAttributeNames;
 	private Map<String, Object> expressionAttributeValues;
-	private Boolean scanIndexForward = Boolean.FALSE;
+	private Boolean scanIndexForward = Boolean.TRUE;
 	private Boolean consistentRead = Boolean.FALSE;
 
 	public String getFilterExpression() {
@@ -69,7 +71,7 @@ public class DynamoDbQueryRequest {
 		String keyConditionExpression;
 		Map<String, String> expressionAttributeNames;
 		Map<String, Object> expressionAttributeValues;
-		Boolean scanIndexForward = Boolean.FALSE;
+		Boolean scanIndexForward = Boolean.TRUE;
 		Boolean consistentRead = Boolean.FALSE;
 
 		private Builder() {

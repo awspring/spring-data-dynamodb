@@ -19,6 +19,12 @@ import java.lang.annotation.*;
 import org.springframework.core.annotation.AliasFor;
 import org.springframework.data.annotation.Persistent;
 
+/**
+ * Maps an entity to a DynamoDB table.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Documented
 @Persistent
 @Inherited
@@ -26,13 +32,16 @@ import org.springframework.data.annotation.Persistent;
 @Target({ ElementType.TYPE })
 public @interface Table {
 
+	/**
+	 * @return the physical table name
+	 */
 	@AliasFor("tableName")
 	String value() default "";
 
+	/**
+	 * @return the physical table name
+	 */
 	@AliasFor("value")
 	String tableName() default "";
 
-	String typeName() default "";
-
-	String discriminator() default "";
 }

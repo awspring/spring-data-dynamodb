@@ -15,21 +15,21 @@
  */
 package io.awspring.spring.data.examples.model;
 
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateItem;
-import io.awspring.spring.data.dynamodb.core.mapping.AggregateTable;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
+import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
 import java.util.List;
 
 /**
  * @author Matej Nedic
  * @since 1.0.0
  */
-@AggregateTable(tableName = "Commerce", indexName = "GSI2", partitionKey = "gsi2pk", sortKey = "gsi2sk")
-public class OrderByIndex {
+@ItemCollectionView(tableName = "Commerce", indexName = "GSI2", partitionKey = "gsi2pk", sortKey = "gsi2sk")
+public class OrderItemCollectionByIndex {
 
-	@AggregateItem(startsWith = "ORDER#")
+	@ItemCollectionMember(startsWith = "ORDER#")
 	private Order order;
 
-	@AggregateItem(startsWith = "ITEM#")
+	@ItemCollectionMember(startsWith = "ITEM#")
 	private List<OrderItem> items;
 
 	public Order getOrder() {

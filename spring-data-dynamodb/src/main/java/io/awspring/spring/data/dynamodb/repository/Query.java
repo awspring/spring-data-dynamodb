@@ -22,34 +22,43 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import org.springframework.data.annotation.QueryAnnotation;
 
+/**
+ * Declares an explicit DynamoDB repository read query.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
 @Documented
 @QueryAnnotation
 public @interface Query {
 
+	/** @return the DynamoDB key-condition expression */
 	String keyConditionExpression() default "";
 
+	/** @return the DynamoDB filter expression */
 	String filterExpression() default "";
 
+	/** @return the secondary index name */
 	String indexName() default "";
 
+	/** @return whether the query requests a strongly consistent read */
 	boolean consistentRead() default false;
 
+	/** @return the maximum evaluated items per request, or {@code -1} for no explicit limit */
 	int limit() default -1;
 
+	/** @return whether a scan is allowed when no key condition is available */
 	boolean allowScan() default false;
 
-	boolean typeFilter() default true;
-
+	/** @return the PartiQL statement */
 	String partiQl() default "";
 
-	String updateExpression() default "";
-
-	String conditionExpression() default "";
-
+	/** @return expression attribute-name mappings */
 	ExpressionName[] names() default {};
 
+	/** @return constant expression attribute values */
 	ExpressionValue[] values() default {};
 
 }
