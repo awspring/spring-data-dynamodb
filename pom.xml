@@ -92,14 +92,14 @@
 
 	<profiles>
 		<!--
-			Documentation build, activated by `make docs` (or `-Pdocs`).
+			Documentation build, activated by `make docs` (or `-Pdocs-classic`).
 
 			Produces:
 			  - reference documentation -> docs/target/generated-docs/  (see docs/pom.xml)
 			  - aggregated API docs     -> target/site/apidocs/
 		-->
 		<profile>
-			<id>docs</id>
+			<id>docs-classic</id>
 			<build>
 				<plugins>
 					<plugin>

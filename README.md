@@ -12,7 +12,7 @@ For a deep dive into the project, refer to the Spring Data DynamoDB documentatio
 
 | Version                    | Reference Docs                                       | API Docs    |
 |----------------------------|------------------------------------------------------|-------------|
-| Spring Data DynamoDB 1.0.0 | [Reference Docs](docs/src/main/content/reference.md) | Coming soon |
+| Spring Data DynamoDB 1.0.0 | [Reference Docs](docs/src/main/asciidoc/reference.adoc) | Coming soon |
 
 ## Features
 

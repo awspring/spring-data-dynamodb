@@ -31,7 +31,7 @@ test: ## Run the full test suite (integration tests need a running Docker daemon
 doc: docs ## Alias for docs
 
 docs: ## Build the reference documentation and the API docs without formatting sources
-	$(MVN) package -Pdocs -DskipTests -Dspotless.apply.skip=true
+	$(MVN) package -Pdocs-classic -DskipTests -Dspotless.apply.skip=true
 	@echo
 	@echo "Reference documentation: docs/target/generated-docs/reference/html/reference.html"
 	@echo "API documentation:       target/site/apidocs/index.html"

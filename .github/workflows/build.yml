@@ -37,8 +37,8 @@ jobs:
           distribution: temurin
           java-version: 17.0.12
           cache: maven
-      - name: Validate Docs
-        run: ./mvnw -V -B verify -Pdocs -DskipTests
+      - name: Validate AsciiDoc
+        run: ./mvnw -V -B verify -Pdocs-classic -DskipTests
   sonar:
     name: Run Sonar Analysis
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ the API keeps DynamoDB's `(partition key, sort key)` modeling explicit rather th
 
 ## Contents
 
-- [Reference Guide](src/main/content/reference.md) — the complete guide, covering:
+- [Reference Guide](src/main/asciidoc/reference.adoc) — the complete guide, covering:
   - Getting started (dependencies, configuration, table creation)
   - Mapping entities (`@Table`, `@PartitionKey`, `@SortKey`, `@Column`, `@Version`, `@InnerClass`,
     `@SortKeyTemplate`, `@ItemCollectionView`, `@ItemCollectionMember`)
@@ -49,8 +49,8 @@ without applying changes.
 docs/
 ├── pom.xml                       # docs module (packaging: pom, deploy skipped)
 ├── README.md                     # this index
-└── src/main/content/
-    └── reference.md              # full reference guide
+└── src/main/asciidoc/
+    └── reference.adoc              # full reference guide
 ```
 
 ## License

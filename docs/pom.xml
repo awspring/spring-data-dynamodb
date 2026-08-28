@@ -30,7 +30,6 @@
 		<generated-docs.dir>${project.build.directory}/generated-docs</generated-docs.dir>
 
 		<generate-docs.phase>prepare-package</generate-docs.phase>
-		<convert-markdown.phase>generate-resources</convert-markdown.phase>
 	</properties>
 
 	<build>
@@ -47,34 +46,30 @@
 
 	<profiles>
 		<!--
-			Renders the reference documentation using Spring's official Asciidoctor styling.
-			Activated by `make docs` (or `-Pdocs`).
+			Renders the native AsciiDoc reference documentation using Spring's official styling.
+			Activated by `make docs` (or `-Pdocs-classic`).
 		-->
 		<profile>
-			<id>docs</id>
+			<id>docs-classic</id>
 			<build>
 				<plugins>
-					<!-- Convert Markdown to Asciidoc using Ant/bash -->
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
-						<artifactId>maven-antrun-plugin</artifactId>
-						<version>3.1.0</version>
+						<artifactId>maven-resources-plugin</artifactId>
 						<executions>
 							<execution>
-								<id>convert-markdown-to-asciidoc</id>
-								<phase>${convert-markdown.phase}</phase>
+								<id>copy-asciidoc-resources</id>
+								<phase>generate-resources</phase>
 								<goals>
-									<goal>run</goal>
+									<goal>copy-resources</goal>
 								</goals>
 								<configuration>
-									<target>
-										<mkdir dir="${refdocs.build.directory}"/>
-										<exec executable="bash" failonerror="true">
-											<arg value="-c"/>
-											<arg value="pandoc '${project.basedir}/src/main/content/reference.md' -f markdown -t asciidoc -o '${refdocs.build.directory}/reference.adoc' --wrap=none"/>
-										</exec>
-										<echo message="Converted Markdown to Asciidoc"/>
-									</target>
+									<outputDirectory>${refdocs.build.directory}</outputDirectory>
+									<resources>
+										<resource>
+											<directory>src/main/asciidoc</directory>
+										</resource>
+									</resources>
 								</configuration>
 							</execution>
 						</executions>

@@ -38,7 +38,7 @@ make format
 
 ## Building documentation
 
-Documentation can be built by activating the `docs` profile in the maven build.
+Documentation can be built by activating the `docs-classic` profile in the Maven build.
 
 ```
 make docs

@@ -25,7 +25,7 @@ jobs:
           java-version: 17.0.12
           cache: maven
       - name: Build docs
-        run: ./mvnw clean package javadoc:aggregate -Pdocs -DskipTests=true -e
+        run: ./mvnw clean package javadoc:aggregate -Pdocs-classic -DskipTests=true -e
       - name: Upload to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_AWS_ACCESS_KEY }}
