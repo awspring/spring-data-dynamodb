@@ -35,12 +35,6 @@
 		<dependency>
 			<groupId>org.springframework</groupId>
 			<artifactId>spring-core</artifactId>
-			<exclusions>
-				<exclusion>
-					<groupId>commons-logging</groupId>
-					<artifactId>commons-logging</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework</groupId>
@@ -51,34 +45,15 @@
 		<dependency>
 			<groupId>org.springframework.data</groupId>
 			<artifactId>spring-data-commons</artifactId>
-			<version>4.1.0</version>
+			<version>${springdata.commons}</version>
 		</dependency>
 
-		<!-- Null annotations -->
 		<dependency>
 			<groupId>org.jspecify</groupId>
 			<artifactId>jspecify</artifactId>
 			<version>0.3.0</version>
 		</dependency>
 
-		<!-- JSR-305: compile-only, so javac can read Spring Data's JSR-305-annotated bytecode
-		     (javax.annotation.meta.When); not shipped at runtime. -->
-		<dependency>
-			<groupId>com.google.code.findbugs</groupId>
-			<artifactId>jsr305</artifactId>
-			<version>3.0.2</version>
-			<scope>provided</scope>
-		</dependency>
-
-		<!-- CDI -->
-		<!-- Dependency order required to build against CDI 1.0 and test with CDI 2.0 -->
-
-		<dependency>
-			<groupId>javax.interceptor</groupId>
-			<artifactId>javax.interceptor-api</artifactId>
-			<version>1.2.1</version>
-			<scope>test</scope>
-		</dependency>
 
 		<dependency>
 			<groupId>jakarta.enterprise</groupId>
@@ -89,39 +64,9 @@
 		</dependency>
 
 		<dependency>
-			<groupId>jakarta.annotation</groupId>
-			<artifactId>jakarta.annotation-api</artifactId>
-			<version>${jakarta-annotation-api}</version>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.apache.openwebbeans</groupId>
-			<artifactId>openwebbeans-se</artifactId>
-			<version>${webbeans}</version>
-			<scope>test</scope>
-		</dependency>
-
-
-
-		<dependency>
-			<groupId>software.amazon.awssdk</groupId>
-			<artifactId>bom</artifactId>
-			<version>2.21.12</version>
-			<type>pom</type>
-			<scope>import</scope>
-		</dependency>
-		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>dynamodb</artifactId>
-			<version>2.21.12</version>
-		</dependency>
-
-		<dependency>
-			<groupId>com.amazonaws</groupId>
-			<artifactId>aws-java-sdk-core</artifactId>
-			<version>1.12.159</version>
-			<scope>test</scope>
+			<version>2.48.3</version>
 		</dependency>
 
 		<dependency>
@@ -131,23 +76,11 @@
 			<scope>test</scope>
 		</dependency>
 
-		<dependency>
-			<groupId>org.junit-pioneer</groupId>
-			<artifactId>junit-pioneer</artifactId>
-			<version>0.5.3</version>
-			<scope>test</scope>
-		</dependency>
 
 		<dependency>
 			<groupId>org.awaitility</groupId>
 			<artifactId>awaitility</artifactId>
 			<version>4.2.2</version>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.junit.platform</groupId>
-			<artifactId>junit-platform-launcher</artifactId>
 			<scope>test</scope>
 		</dependency>
 
@@ -160,9 +93,6 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>--add-opens java.base/java.util=ALL-UNNAMED</argLine>
-					<!-- spring-data-parent's default include is **/*Tests.java (plural); this
-					     project's convention is **/*Test.java (singular), so override it to match
-					     so a plain `mvn test` actually discovers this project's tests. -->
 					<includes>
 						<include>**/*Test.java</include>
 					</includes>

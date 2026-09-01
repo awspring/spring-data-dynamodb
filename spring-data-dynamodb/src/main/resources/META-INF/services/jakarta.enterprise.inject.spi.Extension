@@ -1,1 +1,1 @@
-io.awspring.cloud.dynamodb.repository.cdi.DynamoDbRepositoryExtension
+io.awspring.spring.data.dynamodb.repository.cdi.DynamoDbRepositoryExtension

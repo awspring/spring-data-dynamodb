@@ -1,0 +1,51 @@
+/*
+ * Copyright 2013-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package io.awspring.spring.data.dynamodb.core.mapping;
+
+import java.lang.annotation.*;
+
+/**
+ * Maps an embedded property selected by sort-key patterns.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+@Documented
+@Inherited
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ ElementType.FIELD })
+public @interface Embedded {
+
+	/**
+	 * @return the required sort-key prefix
+	 */
+	String startsWith() default "";
+
+	/**
+	 * @return the required sort-key suffix
+	 */
+	String endsWith() default "";
+
+	/**
+	 * @return the regular expression matched against the complete sort key
+	 */
+	String regex() default "";
+
+	/**
+	 * @return whether the property is stored as a DynamoDB map
+	 */
+	boolean serializeAsNestedMap() default false;
+}

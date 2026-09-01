@@ -1,0 +1,33 @@
+rules:
+
+- valueFor: '**Component**'
+  contains: 'Repository'
+  addLabels: ['component: repository']
+- valueFor: '**Component**'
+  contains: 'Template'
+  addLabels: ['component: template']
+- valueFor: '**Component**'
+  contains: 'Mapping'
+  addLabels: ['component: mapping']
+- valueFor: '**Component**'
+  contains: 'Query'
+  addLabels: ['component: query']
+- valueFor: '**Component**'
+  contains: 'Secondary Index'
+  addLabels: ['component: secondary-index']
+- valueFor: '**Component**'
+  contains: 'Single-Table Design'
+  addLabels: ['component: single-table-design']
+- valueFor: '**Component**'
+  contains: 'Pagination'
+  addLabels: ['component: pagination']
+- valueFor: '**Component**'
+  contains: 'PartiQL'
+  addLabels: ['component: partiql']
+
+- valueFor: '**Type**'
+  contains: Feature
+  addLabels: ['type: enhancement']
+- valueFor: '**Type**'
+  contains: Bug
+  addLabels: ['type: bug']

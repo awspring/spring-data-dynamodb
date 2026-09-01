@@ -1,0 +1,31 @@
+/*
+ * Copyright 2013-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package io.awspring.spring.data.dynamodb.core.mapping.events;
+
+import org.springframework.data.mapping.callback.EntityCallback;
+
+/**
+ * Invoked after a DynamoDB item is converted into an entity.
+ *
+ * @author Matej Nedic
+ * @since 1.0.0
+ */
+@FunctionalInterface
+public interface DynamoDbAfterConvertCallback<T> extends EntityCallback<T> {
+
+	/** @return the entity returned by the read operation */
+	T onAfterConvert(T entity, String tableName);
+}

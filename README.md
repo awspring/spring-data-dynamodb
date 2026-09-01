@@ -12,20 +12,21 @@ For a deep dive into the project, refer to the Spring Data DynamoDB documentatio
 
 | Version                    | Reference Docs                                       | API Docs    |
 |----------------------------|------------------------------------------------------|-------------|
-| Spring Data DynamoDB 1.0.0 | [Reference Docs](docs/src/main/content/reference.md) | Coming soon |
+| Spring Data DynamoDB 1.0.0 | [Reference Docs](docs/src/main/asciidoc/reference.adoc) | Coming soon |
 
 ## Features
 
 - **Spring Data Repository Support**: Familiar Spring Data repository abstractions for DynamoDB
 - **Query Methods**: Derive queries from method names, or write expressions explicitly with `@Query`
 - **Secondary Index Views**: Read-only, typed views over Global and Local Secondary Indexes
-- **Single-Table Design**: Polymorphic containers with `@InnerClass` prefix routing
+- **Single-Table Design**: Heterogeneous containers with `@Embedded` prefix or regex routing
+- **Item-Collection Views**: Fold a partition's heterogeneous rows into one typed object via `@ItemCollectionView` and `ItemCollectionRepository`
 - **Sort Key Templates**: Compose and decompose sort keys from several properties
 - **Keyset Pagination**: `Window<T>` pagination backed by DynamoDB's `LastEvaluatedKey`
 - **Optimistic Locking**: `@Version`-based conditional writes
 - **PartiQL**: Execute PartiQL statements from repository methods
 - **Template API**: `DynamoDbOperations` for work that does not fit a repository method
-- **Event Callbacks**: Before/after save, convert, and delete callbacks
+- **Event Callbacks**: Before/after save, convert, and delete events; before/after save and convert callbacks
 
 ## Compatibility with Spring Project Versions
 
@@ -151,13 +152,97 @@ public class Match {
     @PartitionKey
     private String pk;
 
-    @SortKey
-    private String sk;              // composed: "MATCH#2026-02-01#m1"
-
     private LocalDate matchDate;
     private String matchId;
 }
 ```
+
+The model does not need an `sk` property. The template writes the composed `sk` attribute directly and decomposes it back onto the placeholder properties when the item is read. Repository point operations use `DynamoDbCompositeId.of(partitionKey, composedSortKey)` for this model. Derived methods can compose the default base-table template from equality predicates on a leading placeholder subset; templates with an explicit `column` materialize that secondary attribute but do not auto-select an index, so query it through a typed `@SecondaryIndex` view.
+
+### Heterogeneous Containers
+
+`@Embedded` flattens an embedded object into the owning item, and routes each row to the one field
+whose shape it actually is. Routing is decided by matching the row's sort key against `startsWith`,
+`endsWith`, or `regex`:
+
+```java
+@Table(tableName = "single_table_demo")
+public class CustomerRow {
+
+    @PartitionKey @Column("PK") private String pk;   // "CUSTOMER#12345"
+    @SortKey      @Column("SK") private String sk;
+
+    @Embedded(regex = "ORDER#[^#]+")               // "ORDER#9876"
+    private OrderData order;
+
+    @Embedded(regex = "ORDER#[^#]+#LINE#[^#]+")    // "ORDER#9876#LINE#abc"
+    private OrderLineData line;
+}
+```
+
+Prefixes are the shorter form, but they cannot separate hierarchical sort keys where one kind's
+prefix is a prefix of another's: `startsWith = "ORDER#"` matches `ORDER#9876` *and*
+`ORDER#9876#LINE#abc`, so an order-line row would populate `order` as well. `regex` draws the
+boundary that prefix matching cannot.
+
+The pattern must match the **whole** sort key rather than merely appear inside it, and it is
+compiled once when the entity is first mapped, so an invalid pattern fails at bootstrap. All
+declared conditions must hold if you combine `regex` with `startsWith`/`endsWith`.
+
+Ambiguity is not checked: if two members can match the same sort key, both are populated. Keep the
+routes mutually exclusive.
+
+
+### Item-Collection Views
+
+`@ItemCollectionView` provides a simpler, read-only approach to modeling Single Table Design for query use cases. It groups related entities from the same partition into a single typed view, making it easier to work with heterogeneous items without manually checking each returned object.
+
+`@ItemCollectionMember` identifies which projection row type should be mapped to each field. Routing is based on the sort key and can use `startsWith`, `endsWith`, or `regex`:
+
+```java
+@ItemCollectionView(tableName = "single_table_demo", partitionKey = "pk", sortKey = "sk")
+public class CustomerRow {
+
+    @ItemCollectionMember(regex = "ORDER#[^#]+")               // "ORDER#9876"
+    private OrderData order;
+
+    @ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+")     // "ORDER#9876#LINE#abc"
+    private List<OrderLineData> line;
+}
+```
+
+Unlike `@Embedded`, `@ItemCollectionView` is intended specifically for read-only aggregation. It groups the matching entities into the appropriate fields of the view instead of requiring callers to inspect every returned object and check which fields are null.
+
+The classes referenced by `@ItemCollectionMember` are projection row types and do not require `@Table`; the enclosing `@ItemCollectionView` defines the physical table and index. A projection type may still use `@Table` when it is also reused as an independently writable entity.
+
+By default a member is routed on the view's declared `sortKey`. Set `@ItemCollectionMember(sortKey = "...")` to route it on a different attribute — useful on an index-backed view whose members are matched on distinct index sort-key attributes.
+
+The view may also be a Java `record`. Members are supplied through the record's canonical constructor, so no setters or default constructor are required, and the projection row types may be records too:
+
+```java
+@ItemCollectionView(tableName = "single_table_demo", partitionKey = "pk", sortKey = "sk")
+public record CustomerRow(
+        @ItemCollectionMember(regex = "ORDER#[^#]+") OrderData order,
+        @ItemCollectionMember(regex = "ORDER#[^#]+#LINE#[^#]+") List<OrderLineData> line) {
+}
+```
+
+Read an item-collection view through an `ItemCollectionRepository<A>` — the read-only counterpart to
+`SecondaryIndexRepository`, with a fixed set of partition-oriented finders:
+
+```java
+public interface CustomerItemCollectionRepository extends ItemCollectionRepository<CustomerRow> {
+}
+
+Optional<CustomerRow> customer = repository.findByPartitionKey("CUSTOMER#123");
+```
+
+`findByPartitionKeyAndSortKey`, `findByPartitionKeyAndSortKeyStartingWith`,
+`findByPartitionKeyAndSortKeyBetween` and `existsByPartitionKey` complete the interface, and a
+`@Query` method can pass a hand-written key condition straight through. Each finder folds one DynamoDB
+response page and does not fetch subsequent pages implicitly. For larger collections, query the row
+projection as `Window<T>`, or call `DynamoDbOperations.queryItemCollection(...)` repeatedly with the
+returned `LastEvaluatedKey`.
 
 ### `@Query` — explicit expressions
 
@@ -174,13 +259,12 @@ public interface MatchRepository extends DynamoDbRepository<Match, String> {
     List<Match> findInDateRange(@Param("pk") String pk,
                                 @Param("from") String from,
                                 @Param("to") String to);
-
-    @Query(filterExpression = "#region = :region",
-           indexName = "GSI1",
-           names = @ExpressionName(name = "#region", value = "region"))
-    List<Match> findByRegionOnIndex(@Param("region") String region);
 }
 ```
+
+To read a secondary index, prefer a typed `@SecondaryIndex` view (see below) queried through a
+`SecondaryIndexRepository`: a base-repository `@Query(indexName = …)` still returns the base entity
+type, so it only fits an index that projects everything that entity maps.
 
 PartiQL statements bind values positionally:
 
@@ -207,6 +291,10 @@ if (page.hasNext()) {
 }
 ```
 
+DynamoDB hands back one resume cursor per page, pointing *after* the last item, so a position is only
+available for the final element — use `positionAt(window.size() - 1)`. Other indices raise
+`IllegalStateException` instead of returning the page-end cursor, which would silently skip rows.
+
 ### Template API
 
 Inject `DynamoDbOperations` (implemented by `DynamoDbTemplate`) for work that does not fit a
@@ -232,11 +320,28 @@ This is a multi-module Maven project:
 
 ```bash
 # Build everything
-mvn install
+./mvnw install
 
 # Build just the library
-mvn -pl spring-data-dynamodb -am install
+./mvnw -pl spring-data-dynamodb -am install
 ```
+
+A `Makefile` wraps the common tasks and uses [Maven Daemon](https://github.com/apache/maven-mvnd)
+when it is installed, falling back to the Maven wrapper:
+
+```bash
+make build     # build and install all modules
+make test      # run the full test suite
+make format    # apply the Spotless code format
+make check     # verify formatting without modifying sources
+make docs      # build the reference guide and API docs
+make clean     # remove all build output
+make           # list the available targets
+```
+
+`make docs` writes the rendered reference guide to
+`docs/target/generated-docs/reference/html/reference.html` and the aggregated Javadoc to
+`target/site/apidocs/index.html`. The build verifies formatting without modifying source files.
 
 Integration tests run against [LocalStack](https://localstack.cloud) via Testcontainers, so a running
 Docker daemon is required for the full test suite.
@@ -246,16 +351,22 @@ Code formatting is enforced by Spotless, which runs automatically during the `co
 
 ## Getting in Touch
 
-- [Discussions on Github](https://github.com/matejnedic/spring-data-dynamodb/discussions) - the best way to discuss anything Spring Data DynamoDB related
-- [Issues on Github](https://github.com/matejnedic/spring-data-dynamodb/issues) - for bug reports and feature requests
+- [Discussions on Github](https://github.com/awspring/spring-data-dynamodb/discussions) - the best way to discuss anything Spring Data DynamoDB related
+- [Issues on Github](https://github.com/awspring/spring-data-dynamodb/issues) - for bug reports and feature requests
 
 Maintainer:
 
-- Matej Nedic [Twitter](https://twitter.com/MatejNedic1)
+- Matej Nedic
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to check out and build the
+project, the conventions a pull request is expected to follow, and how to propose a new feature.
+
+## Security
+
+Please do not report security vulnerabilities through public GitHub issues. See
+[SECURITY.md](SECURITY.md) for how to report them privately.
 
 ## License
 

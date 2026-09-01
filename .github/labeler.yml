@@ -1,0 +1,38 @@
+"component: core":
+  - changed-files:
+    - any-glob-to-any-file:
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/core/*
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/config/*
+"component: repository":
+  - changed-files:
+    - any-glob-to-any-file:
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/repository/**/*
+"component: mapping":
+  - changed-files:
+    - any-glob-to-any-file:
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/mapping/**/*
+"component: query":
+  - changed-files:
+    - any-glob-to-any-file:
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/query/**/*
+"component: secondary-index":
+  - changed-files:
+    - any-glob-to-any-file:
+      - spring-data-dynamodb/src/*/java/io/awspring/cloud/dynamodb/index/**/*
+"status: waiting-for-triage":
+  - changed-files:
+    - any-glob-to-any-file:
+      - ./*
+      - ./**/*
+"type: documentation":
+  - changed-files:
+    - any-glob-to-any-file:
+      - docs/**/*
+"type: dependency-upgrade":
+  - changed-files:
+    - any-glob-to-any-file:
+      - pom.xml
+"type: maintenance":
+  - changed-files:
+    - any-glob-to-any-file:
+      - .github/**/*
