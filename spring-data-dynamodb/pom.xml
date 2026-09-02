@@ -8,7 +8,7 @@
 	<parent>
 		<groupId>io.awspring.cloud</groupId>
 		<artifactId>spring-data-dynamodb-parent</artifactId>
-		<version>1.0.0</version>
+		<version>1.0.0-ALPHA</version>
 	</parent>
 
 	<artifactId>spring-data-dynamodb</artifactId>
