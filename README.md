@@ -35,7 +35,7 @@ the versions that are compatible with Spring Data DynamoDB.
 
 | Spring Data DynamoDB | Spring Boot | Spring Framework | Spring Data Commons | AWS Java SDK | Java |
 |----------------------|-------------|------------------|---------------------|--------------|------|
-| 1.x                  | 4.0.x       | 7.0.x            | 4.1.x               | 2.x          | 17+  |
+| 1.x                  | 4.1.x       | 7.0.x            | 4.1.x               | 2.x          | 17+  |
 
 ## Getting Started
 

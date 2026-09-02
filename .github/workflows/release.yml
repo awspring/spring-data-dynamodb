@@ -32,12 +32,14 @@ jobs:
           server-id: central
           server-username: CENTRAL_TOKEN_USERNAME
           server-password: CENTRAL_TOKEN_PASSWORD
-          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - name: Import GPG key
+        run: gpg --batch --import <(echo "${{ secrets.MAVEN_GPG_PRIVATE_KEY }}")
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
       - name: Run tests
-        run: ./mvnw -V verify javadoc:aggregate -Pdocs-classic
+        run: ./mvnw -V verify javadoc:aggregate -Pdocs-classic -pl '!spring-data-dynamodb-examples'
       - name: Deploy to Sonatype
-        run: ./mvnw -V -Prelease deploy -DskipTests
+        run: ./mvnw -V -Prelease deploy -DskipTests -pl '!spring-data-dynamodb-examples'
         env:
           CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
