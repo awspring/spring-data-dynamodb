@@ -1,9 +1,13 @@
 # Spring Data DynamoDB — Examples
 
-A runnable Spring Boot walk-through of the `spring-data-dynamodb` programming model against a
-single `Commerce` table modelled in the [Alex DeBrie](https://www.dynamodbbook.com/) single-table
-style. Everything runs locally against [LocalStack](https://www.localstack.cloud/) — no AWS account
-required.
+A runnable Spring Boot walk-through of the `spring-data-dynamodb` programming model against a single
+`Commerce` table. Everything runs locally against [LocalStack](https://www.localstack.cloud/) — no
+AWS account required.
+
+## Modeling
+
+The examples are inspired by the AWS re:Invent 2019 talk
+[Data modeling with Amazon DynamoDB (CMY304)](https://www.youtube.com/watch?v=DIQVJqiSUkE&t).
 
 ## Prerequisites
 

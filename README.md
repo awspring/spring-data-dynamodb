@@ -10,9 +10,9 @@ that modeling explicit and readable rather than to hide it.
 
 For a deep dive into the project, refer to the Spring Data DynamoDB documentation:
 
-| Version                    | Reference Docs                                       | API Docs    |
-|----------------------------|------------------------------------------------------|-------------|
-| Spring Data DynamoDB 1.0.0 | [Reference Docs](docs/src/main/asciidoc/reference.adoc) | Coming soon |
+| Version                    | Reference Docs                                       | API Docs                                                                                      |
+|----------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| Spring Data DynamoDB 1.0.0 | [Reference Docs](https://docs.awspring.io/spring-data-dynamodb/docs/1.0.0-ALPHA/reference/html/reference.html) | [API Docs](https://docs.awspring.io/spring-data-dynamodb/docs/1.0.0-ALPHA/apidocs/index.html) |
 
 ## Features
 
