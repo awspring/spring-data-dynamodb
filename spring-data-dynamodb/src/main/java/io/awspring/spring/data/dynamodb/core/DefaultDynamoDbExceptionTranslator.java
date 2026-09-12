@@ -15,8 +15,8 @@
  */
 package io.awspring.spring.data.dynamodb.core;
 
-import io.awspring.spring.data.dynamodb.BadStatementGrammarException;
-import io.awspring.spring.data.dynamodb.UncategorizedDynamoDbException;
+import io.awspring.spring.data.dynamodb.exceptions.BadStatementGrammarException;
+import io.awspring.spring.data.dynamodb.exceptions.UncategorizedDynamoDbException;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataAccessException;

@@ -18,7 +18,7 @@ package io.awspring.spring.data.dynamodb.core;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import io.awspring.spring.data.dynamodb.BadStatementGrammarException;
+import io.awspring.spring.data.dynamodb.exceptions.BadStatementGrammarException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.ConcurrencyFailureException;
