@@ -22,6 +22,7 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
+import io.awspring.spring.data.dynamodb.request.DynamoDbVectorSearchRequest;
 import io.awspring.spring.data.dynamodb.request.IndexQueryBuilder;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -62,6 +63,9 @@ public interface DynamoDbOperations {
 	/** Executes one DynamoDB query page. */
 	<T> EntityQueryResult<List<T>> query(Class<T> entityClass, DynamoDbQueryRequest queryRequest,
 			DynamoDbPageRequest dynamoDBPageRequest);
+
+	/** Executes one DynamoDB vector similarity search, most similar result first. */
+	<T> EntityQueryResult<List<T>> searchVectors(Class<T> entityClass, DynamoDbVectorSearchRequest request);
 
 	/** Executes a PartiQL statement with positional values. */
 	<T> EntityReadResult<List<T>> executeStatement(String statement, String nextToken, Class<T> entityClass,

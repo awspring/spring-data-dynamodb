@@ -51,6 +51,7 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 		implements DynamoDbPersistentProperty, ApplicationContextAware {
 	private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
 	private final Lazy<List<KeyRole>> keyRoles = Lazy.of(this::determineKeyRoles);
+	private final Lazy<Optional<VectorIndexMetadata>> vectorIndex = Lazy.of(this::determineVectorIndex);
 	private String columnName;
 
 	private @Nullable StandardEvaluationContext spelContext;
@@ -211,6 +212,22 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 	}
 
 	@Override
+	public boolean isVectorIndexed() {
+		return isAnnotationPresent(VectorIndex.class);
+	}
+
+	@Override
+	@Nullable
+	public VectorIndexMetadata getVectorIndex() {
+		return vectorIndex.get().orElse(null);
+	}
+
+	@Override
+	public boolean isScore() {
+		return isAnnotationPresent(Score.class);
+	}
+
+	@Override
 	public List<KeyRole> getKeyRoles() {
 		return keyRoles.get();
 	}
@@ -247,6 +264,15 @@ public class BasicDynamoDbPersistentProperty extends AnnotationBasedPersistentPr
 			roles.add(new KeyRole(KeyRole.KeyType.SORT, sortKey.order()));
 		}
 		return List.copyOf(roles);
+	}
+
+	private Optional<VectorIndexMetadata> determineVectorIndex() {
+		VectorIndex annotation = findAnnotation(VectorIndex.class);
+		if (annotation == null) {
+			return Optional.empty();
+		}
+		String tableName = StringUtils.hasText(annotation.tableName()) ? annotation.tableName() : null;
+		return Optional.of(new VectorIndexMetadata(annotation.indexName(), tableName));
 	}
 
 	@Nullable

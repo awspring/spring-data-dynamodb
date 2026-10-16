@@ -19,6 +19,7 @@ import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.ExpressionValue;
 import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.Update;
+import io.awspring.spring.data.dynamodb.repository.VectorSearch;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -106,6 +107,10 @@ final class QueryExpressions {
 		return expressionNames(update != null ? update.names() : null);
 	}
 
+	static Map<String, String> expressionNames(@Nullable VectorSearch vectorSearch) {
+		return expressionNames(vectorSearch != null ? vectorSearch.names() : null);
+	}
+
 	private static Map<String, String> expressionNames(@Nullable ExpressionName[] mappings) {
 		Map<String, String> names = new LinkedHashMap<>();
 		if (mappings != null) {
@@ -126,6 +131,13 @@ final class QueryExpressions {
 			Parameters<?, ?> parameters, ParameterAccessor accessor, Map<String, Object> values) {
 		applyExpressionValues(update != null ? update.values() : null, valueExpressionDelegate, parameters, accessor,
 				values);
+	}
+
+	static void applyExpressionValues(@Nullable VectorSearch vectorSearch,
+			ValueExpressionDelegate valueExpressionDelegate, Parameters<?, ?> parameters, ParameterAccessor accessor,
+			Map<String, Object> values) {
+		applyExpressionValues(vectorSearch != null ? vectorSearch.values() : null, valueExpressionDelegate, parameters,
+				accessor, values);
 	}
 
 	private static void applyExpressionValues(@Nullable ExpressionValue[] mappings,

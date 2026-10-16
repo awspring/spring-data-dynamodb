@@ -22,6 +22,8 @@ import io.awspring.spring.data.dynamodb.repository.query.DynamoDbQueryMethod;
 import io.awspring.spring.data.dynamodb.repository.query.PartTreeDynamoDbQuery;
 import io.awspring.spring.data.dynamodb.repository.query.StringBasedDynamoDbQuery;
 import io.awspring.spring.data.dynamodb.repository.query.StringBasedItemCollectionQuery;
+import io.awspring.spring.data.dynamodb.repository.query.StringBasedVectorSearchQuery;
+import io.awspring.spring.data.dynamodb.repository.query.VectorSearchQuery;
 import io.awspring.spring.data.dynamodb.repository.support.DynamoDbEntityInformation;
 import io.awspring.spring.data.dynamodb.repository.support.MappingDynamoDbEntityInformation;
 import java.lang.reflect.Method;
@@ -73,7 +75,8 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	@Override
 	protected Object getTargetRepository(RepositoryInformation information) {
 		DynamoDbEntityInformation<?, Object> entityInformation = getEntityInformation(information.getDomainType(),
-				isSecondaryIndexView(information) || isItemCollectionRepository(information));
+				isSecondaryIndexView(information) || isItemCollectionRepository(information)
+						|| isVectorSearchRepository(information));
 		return getTargetRepositoryViaReflection(information, entityInformation, operations);
 	}
 
@@ -85,10 +88,17 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 		return ItemCollectionRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
 	}
 
+	private static boolean isVectorSearchRepository(RepositoryMetadata metadata) {
+		return VectorSearchRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
+	}
+
 	@Override
 	protected Class<?> getRepositoryBaseClass(RepositoryMetadata metadata) {
 		if (isItemCollectionRepository(metadata)) {
 			return SimpleItemCollectionRepository.class;
+		}
+		if (isVectorSearchRepository(metadata)) {
+			return SimpleVectorSearchRepository.class;
 		}
 		return SimpleDynamoDbRepository.class;
 	}
@@ -112,6 +122,13 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 
 		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, factory, mappingContext);
 		String namedQueryName = queryMethod.getNamedQueryName();
+
+		if (queryMethod.hasVectorSearch()) {
+			return new StringBasedVectorSearchQuery(queryMethod, operations, valueExpressionDelegate);
+		}
+		if (queryMethod.hasVectorQuery()) {
+			return new VectorSearchQuery(queryMethod, operations);
+		}
 
 		boolean useDeclaredQueries = lookupStrategyKey != Key.CREATE;
 		if (queryMethod.isUpdateQuery()) {

@@ -1,8 +1,8 @@
 # Spring Data DynamoDB — Examples
 
 A runnable Spring Boot walk-through of the `spring-data-dynamodb` programming model against a single
-`Commerce` table. Everything runs locally against [LocalStack](https://www.localstack.cloud/) — no
-AWS account required.
+`Commerce` table, plus an on-demand `Products` table for vector search. Everything runs locally against
+[Floci](https://github.com/floci-io/floci), a free local AWS emulator — no AWS account required.
 
 ## Modeling
 
@@ -13,37 +13,37 @@ The examples are inspired by the AWS re:Invent 2019 talk
 
 - Java 17+
 - Maven 3.9+
-- Docker (to run LocalStack)
+- Docker (to run Floci)
 - `curl` (used by the table-creation script)
 
-## 1. Start LocalStack
+## 1. Start Floci
 
-LocalStack exposes the DynamoDB API on `http://localhost:4566`.
+Floci exposes the DynamoDB API, including `SearchVectors`, on `http://localhost:4566`.
 
 ```bash
-docker run --rm -it -p 4566:4566 localstack/localstack
+docker run --rm -it -p 4566:4566 floci/floci:latest
 ```
 
 Or with Docker Compose:
 
 ```yaml
 services:
-  localstack:
-    image: localstack/localstack
+  floci:
+    image: floci/floci:latest
     ports:
       - "4566:4566"
-    environment:
-      - SERVICES=dynamodb
 ```
 
 ```bash
 docker compose up
 ```
 
-## 2. Create the table
+## 2. Create the tables
 
 The script creates the `Commerce` table (partition key `pk`, sort key `sk`) with two overloaded
-global secondary indexes, `GSI1` and `GSI2`.
+global secondary indexes, `GSI1` and `GSI2`, and the on-demand `Products` table with the vector index
+`ProductEmbeddingIndex` (3 dimensions, `COSINE`, `category` and `brand` as inline filters). Vector
+indexes require on-demand capacity.
 
 ```bash
 bash src/main/resources/create-tables.sh
@@ -90,6 +90,7 @@ cohesive part of the programming model:
 | 100 | `ConversionAndVersionUseCase` | `@ValueConverter`, `@Version`, `@SortKeyTemplate`, and `@Derived` decomposition |
 | 110 | `LifecycleUseCase` | Before/after entity callbacks and mapping application events |
 | 120 | `UpdateDeleteUseCase` | `@Update` update expressions, state-based template updates, and deletes |
+| 130 | `VectorSearchUseCase` | `@VectorIndex`/`@Score` mapping, `VectorSearchRepository.searchNearest`, `@VectorQuery` with `@Filter`, `@VectorSearch`, and an `Optional` nearest match |
 
 The normal named query is a **scan filter** and therefore its repository method opts in with
 `@AllowScan`. The item-collection named query is a **key-condition expression**, because an item
@@ -105,3 +106,5 @@ repository `Window<T>` position or a template `LastEvaluatedKey`.
   table or a secondary index) into one typed object, routing each row by its sort key.
 - `@Embedded` — either embed a value object as a nested map (`serializeAsNestedMap = true`) or, on
   a container entity, route rows to typed fields by sort-key `startsWith` / `endsWith` / `regex`.
+- `@VectorIndex` / `@Score` — the `float[]` embedding searched by a DynamoDB vector index, and the
+  similarity score each search result receives (never stored).

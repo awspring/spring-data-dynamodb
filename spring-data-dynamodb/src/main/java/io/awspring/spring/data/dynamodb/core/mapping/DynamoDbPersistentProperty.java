@@ -60,4 +60,11 @@ public interface DynamoDbPersistentProperty
 
 	@Nullable
 	ItemCollectionMember getItemCollectionMember();
+
+	boolean isVectorIndexed();
+
+	@Nullable
+	VectorIndexMetadata getVectorIndex();
+
+	boolean isScore();
 }

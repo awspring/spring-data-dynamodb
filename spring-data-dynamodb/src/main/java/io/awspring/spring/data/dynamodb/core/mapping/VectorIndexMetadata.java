@@ -13,29 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.awspring.spring.data.dynamodb;
+package io.awspring.spring.data.dynamodb.core.mapping;
 
-import org.junit.Rule;
-import org.testcontainers.containers.localstack.LocalStackContainer;
-import org.testcontainers.utility.DockerImageName;
+import org.jspecify.annotations.Nullable;
 
 /**
+ * Vector index declared by a {@link VectorIndex} property.
+ *
  * @author Matej Nedic
  * @since 1.0.0
  */
-public class LocalStackTestContainer {
-	static DockerImageName localstackImage = DockerImageName.parse("localstack/localstack:4.4.0");
-
-	@Rule
-	public static LocalStackContainer localstack;
-
-	static {
-		if (localstack == null) {
-			localstack = new LocalStackContainer(localstackImage).withServices(LocalStackContainer.Service.DYNAMODB)
-					.withReuse(true);
-		}
-		if (!localstack.isRunning()) {
-			localstack.start();
-		}
-	}
+public record VectorIndexMetadata(String indexName, @Nullable String tableName) {
 }

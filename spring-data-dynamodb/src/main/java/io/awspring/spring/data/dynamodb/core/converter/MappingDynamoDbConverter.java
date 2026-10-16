@@ -104,7 +104,7 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 
 		ConvertingPropertyAccessor<?> convertingPropertyAccessor = newConvertingPropertyAccessor(obj, persistentEntity);
 		for (DynamoDbPersistentProperty property : persistentEntity) {
-			if (property.isDerived()) {
+			if (property.isDerived() || property.isScore()) {
 				continue;
 			}
 			if (propertyValueConversions.hasValueConverter(property)) {
@@ -225,7 +225,8 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 			DynamoDbPersistentEntity<?> entity) {
 		ConvertingPropertyAccessor<?> accessor = newConvertingPropertyAccessor(objectToUpdate, entity);
 		for (DynamoDbPersistentProperty property : entity) {
-			if (property.isIdProperty() || isBaseTableSortKey(property, entity) || property.isDerived()) {
+			if (property.isIdProperty() || isBaseTableSortKey(property, entity) || property.isDerived()
+					|| property.isScore()) {
 				continue;
 			}
 			if (propertyValueConversions.hasValueConverter(property)) {
@@ -252,7 +253,8 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 
 	private void clearFlattened(Map<String, AttributeValueUpdate> values, DynamoDbPersistentEntity<?> entity) {
 		for (DynamoDbPersistentProperty property : entity) {
-			if (property.isIdProperty() || isBaseTableSortKey(property, entity) || property.isDerived()) {
+			if (property.isIdProperty() || isBaseTableSortKey(property, entity) || property.isDerived()
+					|| property.isScore()) {
 				continue;
 			}
 			if (property.isSpecialType() && !property.serializeAsNestedMap()) {
@@ -372,6 +374,9 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		ConvertingPropertyAccessor<R> propertyAccessor = newConvertingPropertyAccessor(instance, entity);
 
 		for (DynamoDbPersistentProperty property : entity) {
+			if (property.isScore()) {
+				continue;
+			}
 			if (creatorMetadata != null && creatorMetadata.isCreatorParameter(property)) {
 				continue;
 			}
@@ -682,6 +687,20 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		else if (value instanceof byte[] bytes) {
 			return AttributeValue.builder().b(software.amazon.awssdk.core.SdkBytes.fromByteArray(bytes)).build();
 		}
+		else if (value instanceof float[] floats) {
+			List<AttributeValue> elements = new ArrayList<>(floats.length);
+			for (float element : floats) {
+				elements.add(AttributeValue.builder().n(Float.toString(element)).build());
+			}
+			return AttributeValue.builder().l(elements).build();
+		}
+		else if (value instanceof double[] doubles) {
+			List<AttributeValue> elements = new ArrayList<>(doubles.length);
+			for (double element : doubles) {
+				elements.add(AttributeValue.builder().n(Double.toString(element)).build());
+			}
+			return AttributeValue.builder().l(elements).build();
+		}
 		else if (value instanceof Enum<?> anEnum) {
 			return AttributeValue.builder().s(anEnum.name()).build();
 		}
@@ -783,6 +802,20 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 		return fromAttributeValue(attributeValue, type, null, serializeAsNestedMap);
 	}
 
+	private static List<String> numericElements(AttributeValue attributeValue, Class<?> type) {
+		List<AttributeValue> elements = attributeValue.l();
+		List<String> numbers = new ArrayList<>(elements.size());
+		for (int i = 0; i < elements.size(); i++) {
+			String number = elements.get(i).n();
+			if (number == null) {
+				throw new MappingException("Cannot read " + type.getSimpleName() + " from a List (L) whose element " + i
+						+ " does not carry a Number (N) value");
+			}
+			numbers.add(number);
+		}
+		return numbers;
+	}
+
 	private Object fromAttributeValue(@Nullable AttributeValue attributeValue, Class<?> type,
 			@Nullable Class<?> elementType, boolean serializeAsNestedMap) {
 		if (attributeValue == null || attributeValue.nul() != null) {
@@ -794,6 +827,28 @@ public class MappingDynamoDbConverter extends AbstractDynamoDbConverter
 						+ " from AttributeValue that does not carry a String (S) value");
 			}
 			return Enum.valueOf((Class<Enum>) type, attributeValue.s());
+		}
+		else if (type == float[].class) {
+			if (!attributeValue.hasL()) {
+				return null;
+			}
+			List<String> numbers = numericElements(attributeValue, type);
+			float[] floats = new float[numbers.size()];
+			for (int i = 0; i < floats.length; i++) {
+				floats[i] = Float.parseFloat(numbers.get(i));
+			}
+			return floats;
+		}
+		else if (type == double[].class) {
+			if (!attributeValue.hasL()) {
+				return null;
+			}
+			List<String> numbers = numericElements(attributeValue, type);
+			double[] doubles = new double[numbers.size()];
+			for (int i = 0; i < doubles.length; i++) {
+				doubles[i] = Double.parseDouble(numbers.get(i));
+			}
+			return doubles;
 		}
 		else if (List.class.isAssignableFrom(type)) {
 			if (attributeValue.hasL()) {

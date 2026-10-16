@@ -22,6 +22,8 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
+import io.awspring.spring.data.dynamodb.request.DynamoDbVectorSearchRequest;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -385,6 +387,42 @@ public class StatementFactory {
 			builder.exclusiveStartKey(exclusiveKey);
 		}
 		if (request.getProjectionExpression() != null) {
+			builder.projectionExpression(request.getProjectionExpression());
+		}
+		return builder.build();
+	}
+
+	public SearchVectorsRequest searchVectors(String tableName, @Nullable String indexName,
+			DynamoDbPersistentEntity<?> entity, DynamoDbVectorSearchRequest request) {
+		Assert.notNull(tableName, "TableName must not be null");
+		Assert.notNull(entity, "DynamoDbPersistentEntity must not be null");
+		Assert.notNull(request, "DynamoDbVectorSearchRequest must not be null");
+
+		SearchVectorsRequest.Builder builder = SearchVectorsRequest.builder().tableName(tableName).indexName(indexName)
+				.topK(request.getTopK());
+
+		float[] vector = request.getVector();
+		if (vector != null) {
+			List<AttributeValue> searchVector = new ArrayList<>(vector.length);
+			for (float element : vector) {
+				searchVector.add(AttributeValue.builder().n(Float.toString(element)).build());
+			}
+			builder.searchVector(searchVector);
+		}
+		if (StringUtils.hasLength(request.getSearchConditionExpression())) {
+			builder.searchConditionExpression(request.getSearchConditionExpression());
+		}
+		if (request.getExpressionAttributeNames() != null) {
+			builder.expressionAttributeNames(request.getExpressionAttributeNames());
+		}
+		if (request.getExpressionAttributeValues() != null) {
+			Map<String, AttributeValue> expressionAttributesToBuild = new HashMap<>(
+					request.getExpressionAttributeValues().size());
+			request.getExpressionAttributeValues().forEach(
+					(k, v) -> expressionAttributesToBuild.put(k, dynamoDbConverter.convertToDynamoDbType(v, entity)));
+			builder.expressionAttributeValues(expressionAttributesToBuild);
+		}
+		if (StringUtils.hasLength(request.getProjectionExpression())) {
 			builder.projectionExpression(request.getProjectionExpression());
 		}
 		return builder.build();

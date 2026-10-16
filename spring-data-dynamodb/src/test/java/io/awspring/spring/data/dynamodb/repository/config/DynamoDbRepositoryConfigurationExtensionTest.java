@@ -26,6 +26,7 @@ import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepositoryFactory;
 import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
+import io.awspring.spring.data.dynamodb.repository.VectorSearchRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -46,8 +47,8 @@ class DynamoDbRepositoryConfigurationExtensionTest {
 
 		assertTrue(extension.getIdentifyingAnnotations()
 				.containsAll(List.of(Table.class, SecondaryIndex.class, ItemCollectionView.class)));
-		assertTrue(extension.getIdentifyingTypes().containsAll(
-				List.of(DynamoDbRepository.class, SecondaryIndexRepository.class, ItemCollectionRepository.class)));
+		assertTrue(extension.getIdentifyingTypes().containsAll(List.of(DynamoDbRepository.class,
+				SecondaryIndexRepository.class, ItemCollectionRepository.class, VectorSearchRepository.class)));
 	}
 
 	@Test

@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.spring.data.dynamodb.core.DynamoDbTemplate;
 import io.awspring.spring.data.dynamodb.core.EntityQueryResult;
@@ -33,6 +33,7 @@ import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
 import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +62,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class PaginationIntegrationTest extends LocalStackTestContainer {
+public class PaginationIntegrationTest extends FlociTestContainer {
 
 	private static final String TABLE_NAME = "pagination_it";
 	private static final String PARTITION = "P";
@@ -139,10 +140,9 @@ public class PaginationIntegrationTest extends LocalStackTestContainer {
 
 	@BeforeEach
 	void setUp() {
-		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		recreateTable(dynamoDbClient);

@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.spring.data.dynamodb.core.DynamoDbOperations;
 import io.awspring.spring.data.dynamodb.core.mapping.Column;
@@ -35,6 +35,7 @@ import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -73,7 +74,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
+public class SecondaryIndexViewIntegrationTest extends FlociTestContainer {
 
 	private static final String TABLE_NAME = "tournament_arena";
 	private static final String GSI1 = "GSI1";
@@ -309,10 +310,9 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 
 	@BeforeEach
 	void setUp() {
-		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		try {
@@ -362,18 +362,29 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 		waitForTableActive();
 
 		try {
-			dynamoDbClient.updateTable(builder -> builder.tableName(TABLE_NAME)
-					.attributeDefinitions(AttributeDefinition.builder().attributeName("round")
-							.attributeType(ScalarAttributeType.S).build())
-					.globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
-							.create(CreateGlobalSecondaryIndexAction.builder().indexName(ROUND_INDEX).keySchema(
-									KeySchemaElement.builder().attributeName("pk").keyType(KeyType.HASH).build(),
-									KeySchemaElement.builder().attributeName("round").keyType(KeyType.RANGE).build())
-									.projection(Projection.builder().projectionType(ProjectionType.ALL).build())
-									.provisionedThroughput(ProvisionedThroughput.builder().readCapacityUnits(10L)
-											.writeCapacityUnits(10L).build())
-									.build())
-							.build()));
+			dynamoDbClient
+					.updateTable(
+							builder -> builder
+									.tableName(
+											TABLE_NAME)
+									.attributeDefinitions(
+											AttributeDefinition.builder().attributeName("pk").attributeType(
+													ScalarAttributeType.S).build(),
+											AttributeDefinition
+													.builder().attributeName("round")
+													.attributeType(ScalarAttributeType.S).build())
+									.globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+											.create(CreateGlobalSecondaryIndexAction.builder().indexName(ROUND_INDEX)
+													.keySchema(KeySchemaElement.builder().attributeName("pk")
+															.keyType(KeyType.HASH).build(),
+															KeySchemaElement.builder().attributeName("round")
+																	.keyType(KeyType.RANGE).build())
+													.projection(Projection.builder().projectionType(ProjectionType.ALL)
+															.build())
+													.provisionedThroughput(ProvisionedThroughput.builder()
+															.readCapacityUnits(10L).writeCapacityUnits(10L).build())
+													.build())
+											.build()));
 			multiAttributeGsiSupported = waitForIndexActive(ROUND_INDEX);
 		}
 		catch (RuntimeException multiAttributeUnsupported) {
@@ -520,7 +531,7 @@ public class SecondaryIndexViewIntegrationTest extends LocalStackTestContainer {
 		@DisplayName("typed view over multi-attribute GSI matches on both key attributes")
 		void findByTournamentPkAndRound_multiAttrGsi_matchesBothKeys() {
 			Assumptions.assumeTrue(multiAttributeGsiSupported,
-					"this LocalStack build does not support the Nov-2025 multi-attribute GSI-key feature "
+					"this emulator build does not support the Nov-2025 multi-attribute GSI-key feature "
 							+ "-- skipping rather than failing the acceptance suite for an "
 							+ "infra limitation unrelated to the module's own code");
 			seedArena();

@@ -17,7 +17,9 @@ package io.awspring.spring.data.dynamodb.core;
 
 import io.awspring.spring.data.dynamodb.core.converter.DynamoDbConverter;
 import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentEntity;
+import io.awspring.spring.data.dynamodb.core.mapping.DynamoDbPersistentProperty;
 import io.awspring.spring.data.dynamodb.core.mapping.IndexKeySchema;
+import io.awspring.spring.data.dynamodb.core.mapping.VectorIndexMetadata;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterConvertCallback;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterConvertEvent;
 import io.awspring.spring.data.dynamodb.core.mapping.events.DynamoDbAfterDeleteEvent;
@@ -36,6 +38,7 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
+import io.awspring.spring.data.dynamodb.request.DynamoDbVectorSearchRequest;
 import io.awspring.spring.data.dynamodb.request.IndexQueryBuilder;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -57,7 +60,9 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.mapping.callback.EntityCallbacks;
+import org.springframework.data.mapping.model.ConvertingPropertyAccessor;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 import org.springframework.util.backoff.BackOff;
 import org.springframework.util.backoff.BackOffExecution;
 import org.springframework.util.backoff.ExponentialBackOff;
@@ -458,6 +463,61 @@ public class DynamoDbTemplate extends DynamoDbAccessor
 		}
 
 		return EntityQueryResult.of(listToBeReturned, queryResponse.count());
+	}
+
+	@Override
+	public <T> EntityQueryResult<List<T>> searchVectors(Class<T> entityClass, DynamoDbVectorSearchRequest request) {
+		Assert.notNull(entityClass, "Entity type must not be null");
+		Assert.notNull(request, "DynamoDbVectorSearchRequest must not be null");
+
+		DynamoDbPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
+		VectorIndexMetadata vectorIndex = resolveVectorIndex(entity, request.getIndexName());
+		String tableName = vectorIndex != null && vectorIndex.tableName() != null ? vectorIndex.tableName()
+				: getTableName(entityClass);
+		String indexName = StringUtils.hasText(request.getIndexName()) ? request.getIndexName()
+				: vectorIndex != null ? vectorIndex.indexName() : null;
+
+		SearchVectorsRequest searchVectorsRequest = statementFactory.searchVectors(tableName, indexName, entity,
+				request);
+		SearchVectorsResponse response = execute("searchVectors", c -> c.searchVectors(searchVectorsRequest));
+
+		DynamoDbPersistentProperty scoreProperty = entity.getScoreProperty();
+		List<T> results = new ArrayList<>(response.searchResults().size());
+		for (SearchResultItem resultItem : response.searchResults()) {
+			T read = converter.read(entityClass, resultItem.item());
+			if (read == null) {
+				continue;
+			}
+			if (scoreProperty != null && resultItem.score() != null) {
+				new ConvertingPropertyAccessor<>(entity.getPropertyAccessor(read), converter.getConversionService())
+						.setProperty(scoreProperty, resultItem.score());
+			}
+			T converted = maybeCallAfterConvert(read, tableName);
+			maybeEmitEvent(new DynamoDbAfterConvertEvent<>(converted, tableName));
+			results.add(converted);
+		}
+		return EntityQueryResult.of(results, results.size());
+	}
+
+	@Nullable
+	private static VectorIndexMetadata resolveVectorIndex(DynamoDbPersistentEntity<?> entity,
+			@Nullable String requestedIndexName) {
+		List<VectorIndexMetadata> vectorIndexes = entity.getVectorIndexes();
+		if (StringUtils.hasText(requestedIndexName)) {
+			for (VectorIndexMetadata vectorIndex : vectorIndexes) {
+				if (requestedIndexName.equals(vectorIndex.indexName())) {
+					return vectorIndex;
+				}
+			}
+			return null;
+		}
+		if (vectorIndexes.size() > 1) {
+			throw new InvalidDataAccessApiUsageException(
+					entity.getType().getName() + " declares " + vectorIndexes.size() + " @VectorIndex properties "
+							+ vectorIndexes.stream().map(VectorIndexMetadata::indexName).toList()
+							+ "; set the index name on the request, @VectorQuery or @VectorSearch to choose one");
+		}
+		return vectorIndexes.isEmpty() ? null : vectorIndexes.get(0);
 	}
 
 	@Override
