@@ -25,7 +25,6 @@ import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.Update;
 import io.awspring.spring.data.dynamodb.repository.VectorQuery;
 import io.awspring.spring.data.dynamodb.repository.VectorSearch;
-import io.awspring.spring.data.dynamodb.repository.VectorSearchRepository;
 import java.lang.reflect.Method;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -114,13 +113,6 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		if (secondaryIndexRepository && update != null) {
 			throw new InvalidDataAccessApiUsageException(
 					"@Update is not supported on a SecondaryIndexRepository: a @SecondaryIndex view is read-only. "
-							+ "Remove @Update, or move the write to a DynamoDbRepository / DynamoDbOperations. Method: "
-							+ method);
-		}
-
-		if (VectorSearchRepository.class.isAssignableFrom(metadata.getRepositoryInterface()) && update != null) {
-			throw new InvalidDataAccessApiUsageException(
-					"@Update is not supported on a VectorSearchRepository: vector search is read-only. "
 							+ "Remove @Update, or move the write to a DynamoDbRepository / DynamoDbOperations. Method: "
 							+ method);
 		}

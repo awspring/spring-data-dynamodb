@@ -75,8 +75,7 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 	@Override
 	protected Object getTargetRepository(RepositoryInformation information) {
 		DynamoDbEntityInformation<?, Object> entityInformation = getEntityInformation(information.getDomainType(),
-				isSecondaryIndexView(information) || isItemCollectionRepository(information)
-						|| isVectorSearchRepository(information));
+				isSecondaryIndexView(information) || isItemCollectionRepository(information));
 		return getTargetRepositoryViaReflection(information, entityInformation, operations);
 	}
 
@@ -88,17 +87,10 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 		return ItemCollectionRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
 	}
 
-	private static boolean isVectorSearchRepository(RepositoryMetadata metadata) {
-		return VectorSearchRepository.class.isAssignableFrom(metadata.getRepositoryInterface());
-	}
-
 	@Override
 	protected Class<?> getRepositoryBaseClass(RepositoryMetadata metadata) {
 		if (isItemCollectionRepository(metadata)) {
 			return SimpleItemCollectionRepository.class;
-		}
-		if (isVectorSearchRepository(metadata)) {
-			return SimpleVectorSearchRepository.class;
 		}
 		return SimpleDynamoDbRepository.class;
 	}

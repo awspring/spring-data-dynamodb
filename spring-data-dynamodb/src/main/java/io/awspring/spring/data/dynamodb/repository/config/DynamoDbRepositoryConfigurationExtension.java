@@ -22,7 +22,6 @@ import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.SimpleDynamoDbRepository;
-import io.awspring.spring.data.dynamodb.repository.VectorSearchRepository;
 import io.awspring.spring.data.dynamodb.repository.support.DynamoDbRepositoryFactoryBean;
 import java.lang.annotation.Annotation;
 import java.util.Collection;
@@ -85,7 +84,6 @@ public class DynamoDbRepositoryConfigurationExtension extends RepositoryConfigur
 
 	@Override
 	protected Collection<Class<?>> getIdentifyingTypes() {
-		return List.of(DynamoDbRepository.class, SecondaryIndexRepository.class, ItemCollectionRepository.class,
-				VectorSearchRepository.class);
+		return List.of(DynamoDbRepository.class, SecondaryIndexRepository.class, ItemCollectionRepository.class);
 	}
 }

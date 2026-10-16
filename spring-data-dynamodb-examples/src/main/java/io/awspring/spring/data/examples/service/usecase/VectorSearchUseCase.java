@@ -17,7 +17,6 @@ package io.awspring.spring.data.examples.service.usecase;
 
 import io.awspring.spring.data.examples.model.Product;
 import io.awspring.spring.data.examples.repository.ProductRepository;
-import io.awspring.spring.data.examples.repository.ProductSearchRepository;
 import java.util.List;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -30,11 +29,9 @@ public class VectorSearchUseCase implements ExampleUseCase {
 	private static final float[] HEADPHONES_QUERY = { 0.9f, 0.1f, 0.0f };
 
 	private final ProductRepository products;
-	private final ProductSearchRepository productSearch;
 
-	public VectorSearchUseCase(ProductRepository products, ProductSearchRepository productSearch) {
+	public VectorSearchUseCase(ProductRepository products) {
 		this.products = products;
-		this.productSearch = productSearch;
 	}
 
 	@Override
@@ -49,7 +46,7 @@ public class VectorSearchUseCase implements ExampleUseCase {
 				Product.of("P3", "Bluetooth speaker", "audio", "acme", 0.5f, 0.5f, 0.0f),
 				Product.of("P4", "4K monitor", "video", "acme", 0.0f, 0.0f, 1.0f)));
 
-		print("searchNearest(top 2)", productSearch.searchNearest(HEADPHONES_QUERY, 2));
+		print("@VectorQuery top 2", products.findTopTwoNearest(HEADPHONES_QUERY));
 		print("@VectorQuery category=audio", products.findNearestInCategory(HEADPHONES_QUERY, "audio"));
 		print("@VectorSearch category=audio, brand=acme",
 				products.findNearestInCategoryAndBrand(HEADPHONES_QUERY, "audio", "acme"));

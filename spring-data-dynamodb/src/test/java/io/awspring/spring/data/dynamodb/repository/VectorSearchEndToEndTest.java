@@ -43,6 +43,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
 import org.springframework.data.repository.query.Param;
@@ -78,7 +79,10 @@ class VectorSearchEndToEndTest {
 		float[] imageEmbedding;
 	}
 
-	interface ProductSearchRepository extends VectorSearchRepository<ProductMatch> {
+	interface ProductSearchRepository extends DynamoDbRepository<ProductMatch, String> {
+
+		@VectorQuery(topK = 2)
+		List<ProductMatch> findTopTwo(float[] queryVector);
 
 		@VectorQuery(topK = 5)
 		List<ProductMatch> findNearestInCategory(float[] queryVector, @Filter("category") String category);
@@ -96,27 +100,33 @@ class VectorSearchEndToEndTest {
 
 		@VectorQuery(topK = 2)
 		Window<ProductMatch> findNearestWindow(float[] queryVector, ScrollPosition position);
+
+		@VectorQuery
+		List<ProductMatch> findNearestLimited(float[] queryVector, Limit limit);
+
+		@VectorQuery(topK = 4)
+		List<ProductMatch> findNearestUpTo(float[] queryVector, Limit limit);
+
+		@VectorSearch(searchConditionExpression = "#cat = :cat", names = @ExpressionName(name = "#cat", value = "category"))
+		List<ProductMatch> inCategoryLimited(float[] queryVector, @Param("cat") String cat, Limit limit);
 	}
 
-	interface MultiIndexSearchRepository extends VectorSearchRepository<MultiIndexProduct> {
+	interface MissingTopKRepository extends DynamoDbRepository<ProductMatch, String> {
+
+		@VectorQuery
+		List<ProductMatch> withoutTopK(float[] queryVector);
+	}
+
+	interface MultiIndexSearchRepository extends DynamoDbRepository<MultiIndexProduct, String> {
 
 		@VectorQuery(topK = 3, indexName = "TitleIndex")
 		List<MultiIndexProduct> byTitle(float[] queryVector);
 
 		@VectorQuery(topK = 3, indexName = "ImageIndex")
 		List<MultiIndexProduct> byImage(float[] queryVector);
-	}
 
-	interface ProductRepository extends DynamoDbRepository<ProductMatch, String> {
-
-		@VectorQuery(topK = 4)
-		List<ProductMatch> similar(float[] queryVector);
-	}
-
-	interface WritingVectorRepository extends VectorSearchRepository<ProductMatch> {
-
-		@Update(updateExpression = "SET #t = :title", names = @ExpressionName(name = "#t", value = "title"))
-		void rename(@Param("id") String id, @Param("title") String title);
+		@VectorQuery(topK = 3)
+		List<MultiIndexProduct> byAnyIndex(float[] queryVector);
 	}
 
 	private DynamoDbClient client;
@@ -148,11 +158,11 @@ class VectorSearchEndToEndTest {
 	}
 
 	@Test
-	@DisplayName("searchNearest sends table, index, topK and vector, and maps items with their scores in order")
-	void searchNearest_mapsItemsAndScores() {
+	@DisplayName("@VectorQuery sends table, index, topK and vector, and maps items with their scores in order")
+	void vectorQuery_mapsItemsAndScores() {
 		stubResults(result("p1", "Headphones", 0.01), result("p2", "Speaker", 0.02));
 
-		List<ProductMatch> found = factory.getRepository(ProductSearchRepository.class).searchNearest(QUERY_VECTOR, 2);
+		List<ProductMatch> found = factory.getRepository(ProductSearchRepository.class).findTopTwo(QUERY_VECTOR);
 
 		SearchVectorsRequest sent = sentRequest();
 		assertAll(() -> assertEquals(2, found.size()), () -> assertEquals("Headphones", found.get(0).title),
@@ -254,7 +264,7 @@ class VectorSearchEndToEndTest {
 		MultiIndexSearchRepository repository = factory.getRepository(MultiIndexSearchRepository.class);
 
 		InvalidDataAccessApiUsageException exception = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> repository.searchNearest(QUERY_VECTOR, 3));
+				() -> repository.byAnyIndex(QUERY_VECTOR));
 
 		assertAll(() -> assertTrue(exception.getMessage().contains("declares 2 @VectorIndex properties")),
 				() -> assertTrue(exception.getMessage().contains("TitleIndex")),
@@ -262,23 +272,63 @@ class VectorSearchEndToEndTest {
 	}
 
 	@Test
-	@DisplayName("@VectorQuery also works on a base-table DynamoDbRepository")
-	void vectorQuery_onDynamoDbRepository() {
-		stubResults(result("p1", "Headphones", 0.01));
+	@DisplayName("A Limit argument supplies topK at call time when the annotation declares none")
+	void limitArgument_suppliesTopK() {
+		stubResults();
 
-		List<ProductMatch> found = factory.getRepository(ProductRepository.class).similar(QUERY_VECTOR);
+		factory.getRepository(ProductSearchRepository.class).findNearestLimited(QUERY_VECTOR, Limit.of(7));
 
-		SearchVectorsRequest sent = sentRequest();
-		assertAll(() -> assertEquals(1, found.size()), () -> assertEquals("DescriptionIndex", sent.indexName()),
-				() -> assertEquals(4, sent.topK()));
+		assertEquals(7, sentRequest().topK());
 	}
 
 	@Test
-	@DisplayName("@Update on a VectorSearchRepository is rejected at bootstrap")
-	void update_onVectorSearchRepository_rejected() {
-		InvalidDataAccessApiUsageException exception = assertThrows(InvalidDataAccessApiUsageException.class,
-				() -> factory.getRepository(WritingVectorRepository.class));
+	@DisplayName("A limited Limit overrides the annotation's topK; an unlimited one falls back to it")
+	void limitArgument_overridesAnnotationTopK() {
+		stubResults();
+		ProductSearchRepository repository = factory.getRepository(ProductSearchRepository.class);
 
-		assertTrue(exception.getMessage().startsWith("@Update is not supported on a VectorSearchRepository"));
+		repository.findNearestUpTo(QUERY_VECTOR, Limit.of(9));
+		repository.findNearestUpTo(QUERY_VECTOR, Limit.unlimited());
+
+		ArgumentCaptor<SearchVectorsRequest> captor = ArgumentCaptor.forClass(SearchVectorsRequest.class);
+		verify(client, times(2)).searchVectors(captor.capture());
+		assertAll(() -> assertEquals(9, captor.getAllValues().get(0).topK()),
+				() -> assertEquals(4, captor.getAllValues().get(1).topK()));
+	}
+
+	@Test
+	@DisplayName("@VectorSearch takes topK from a Limit argument and still binds its :params")
+	void vectorSearch_limitArgumentAndNamedParameters() {
+		stubResults();
+
+		factory.getRepository(ProductSearchRepository.class).inCategoryLimited(QUERY_VECTOR, "Electronics",
+				Limit.of(6));
+
+		SearchVectorsRequest sent = sentRequest();
+		assertAll(() -> assertEquals(6, sent.topK()),
+				() -> assertEquals("#cat = :cat", sent.searchConditionExpression()),
+				() -> assertEquals(Map.of(":cat", AttributeValue.fromS("Electronics")),
+						sent.expressionAttributeValues()));
+	}
+
+	@Test
+	@DisplayName("An unlimited Limit with no annotated topK is rejected before any call")
+	void unlimitedLimit_withoutAnnotatedTopK_rejected() {
+		ProductSearchRepository repository = factory.getRepository(ProductSearchRepository.class);
+
+		InvalidDataAccessApiUsageException exception = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> repository.findNearestLimited(QUERY_VECTOR, Limit.unlimited()));
+
+		assertAll(() -> assertTrue(exception.getMessage().contains("limited Limit argument")),
+				() -> verifyNoInteractions(client));
+	}
+
+	@Test
+	@DisplayName("A vector search with neither an annotated topK nor a Limit parameter is rejected at bootstrap")
+	void missingTopK_rejectedAtBootstrap() {
+		InvalidDataAccessApiUsageException exception = assertThrows(InvalidDataAccessApiUsageException.class,
+				() -> factory.getRepository(MissingTopKRepository.class));
+
+		assertTrue(exception.getMessage().contains("must declare topK on its annotation or accept a Limit parameter"));
 	}
 }

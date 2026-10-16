@@ -36,16 +36,15 @@ public class VectorSearchQuery extends AbstractVectorSearchQuery {
 	private final List<FilterBinding> filterBindings;
 
 	public VectorSearchQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations) {
-		super(queryMethod, operations);
-		VectorQuery annotation = queryMethod.getVectorQueryAnnotation();
-		Assert.state(annotation != null, () -> "Query method must have a @VectorQuery annotation: " + queryMethod);
-		this.vectorQuery = annotation;
+		super(queryMethod, operations, requiredAnnotation(queryMethod).topK());
+		this.vectorQuery = requiredAnnotation(queryMethod);
 		this.filterBindings = filterBindings(queryMethod.getMethod().getParameters());
 	}
 
-	@Override
-	protected int topK() {
-		return this.vectorQuery.topK();
+	private static VectorQuery requiredAnnotation(DynamoDbQueryMethod queryMethod) {
+		VectorQuery annotation = queryMethod.getVectorQueryAnnotation();
+		Assert.state(annotation != null, () -> "Query method must have a @VectorQuery annotation: " + queryMethod);
+		return annotation;
 	}
 
 	@Override

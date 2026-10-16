@@ -90,7 +90,7 @@ cohesive part of the programming model:
 | 100 | `ConversionAndVersionUseCase` | `@ValueConverter`, `@Version`, `@SortKeyTemplate`, and `@Derived` decomposition |
 | 110 | `LifecycleUseCase` | Before/after entity callbacks and mapping application events |
 | 120 | `UpdateDeleteUseCase` | `@Update` update expressions, state-based template updates, and deletes |
-| 130 | `VectorSearchUseCase` | `@VectorIndex`/`@Score` mapping, `VectorSearchRepository.searchNearest`, `@VectorQuery` with `@Filter`, `@VectorSearch`, and an `Optional` nearest match |
+| 130 | `VectorSearchUseCase` | `@VectorIndex`/`@Score` mapping, `@VectorQuery` with and without `@Filter`, `@VectorSearch`, and an `Optional` nearest match |
 
 The normal named query is a **scan filter** and therefore its repository method opts in with
 `@AllowScan`. The item-collection named query is a **key-condition expression**, because an item

@@ -34,7 +34,11 @@ import org.springframework.data.annotation.QueryAnnotation;
 @QueryAnnotation
 public @interface VectorSearch {
 
-	int topK();
+	/**
+	 * @return the number of results to return, or {@code -1} to require a {@link org.springframework.data.domain.Limit}
+	 * argument; a limited {@code Limit} argument overrides this value
+	 */
+	int topK() default -1;
 
 	String indexName() default "";
 

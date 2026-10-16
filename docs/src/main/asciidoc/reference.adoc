@@ -732,11 +732,11 @@ public class ProductMatch {
 
 `tableName` on `@VectorIndex` defaults to the entity’s table. Declare `@Score` as `Double` or `Float` so an unpopulated score reads as `null` rather than `0.0`, which is a real `COSINE` score.
 
-A `VectorSearchRepository++<++T++>++` contributes `searchNearest(float[] queryVector, int topK)`. Declare further searches with `@VectorQuery`, where each `@Filter("attribute")` parameter becomes an equality condition, or with `@VectorSearch`, which takes the `SearchConditionExpression` verbatim and binds `:params` by `@Param` name, the same model as `@Query`:
+Vector items are ordinary table items, so vector searches are declared on the entity's `DynamoDbRepository`, next to the methods that write it. Declare a search with `@VectorQuery`, where each `@Filter("attribute")` parameter becomes an equality condition, or with `@VectorSearch`, which takes the `SearchConditionExpression` verbatim and binds `:params` by `@Param` name, the same model as `@Query`:
 
 [source,java]
 ----
-public interface ProductSearchRepository extends VectorSearchRepository<ProductMatch> {
+public interface ProductRepository extends DynamoDbRepository<ProductMatch, String> {
 
     @VectorQuery(topK = 10)
     List<ProductMatch> findNearestInCategory(float[] queryVector, @Filter("category") String category);
@@ -752,7 +752,17 @@ public interface ProductSearchRepository extends VectorSearchRepository<ProductM
 }
 ----
 
-`@VectorQuery` and `@VectorSearch` methods may also be declared on a `DynamoDbRepository`. Results arrive most similar first. A `List` return holds all results, an `Optional` or single-entity return holds the most similar one, and a `Window` return holds all results with `hasNext()` false; the `ScrollPosition` parameter Spring Data requires on a `Window` method is ignored, because the search has no continuation.
+To choose the result count at call time, accept a `Limit` parameter. A limited `Limit` overrides the annotation's `topK`, and an unlimited one falls back to it. `topK` may then be omitted, in which case the caller must pass a limited `Limit`. A method with neither `topK` nor a `Limit` parameter is rejected at bootstrap:
+
+[source,java]
+----
+@VectorQuery
+List<ProductMatch> findNearest(float[] queryVector, Limit limit);
+
+repository.findNearest(queryVector, Limit.of(20));
+----
+
+Results arrive most similar first. A `List` return holds all results, an `Optional` or single-entity return holds the most similar one, and a `Window` return holds all results with `hasNext()` false; the `ScrollPosition` parameter Spring Data requires on a `Window` method is ignored, because the search has no continuation.
 
 When an entity declares more than one `@VectorIndex`, set `indexName` on `@VectorQuery`/`@VectorSearch` (or on `DynamoDbVectorSearchRequest`) to choose the index; its `tableName` then applies. A search with no index name on such an entity fails with `InvalidDataAccessApiUsageException` before any call is made.
 
@@ -765,7 +775,7 @@ The module does not validate the search against the service’s rules; `topK`, t
 
 Results contain only attributes projected into the vector index, and the vector attribute is excluded unless it is requested through `ProjectionExpression`, so a `@VectorIndex` property usually reads as `null` on a search result. The score’s direction depends on the index’s distance function: lower is closer for `COSINE` and `EUCLIDEAN`, higher is closer for `DOT++_++PRODUCT`.
 
-A `ValidationException` is retryable only while a new index is backfilling or just after it becomes `ACTIVE`; outside that window it means the request itself is invalid. Vector search is read-only: `@Update` methods are rejected at bootstrap on a `VectorSearchRepository`.
+A `ValidationException` is retryable only while a new index is backfilling or just after it becomes `ACTIVE`; outside that window it means the request itself is invalid.
 
 ==== Creating the vector index
 

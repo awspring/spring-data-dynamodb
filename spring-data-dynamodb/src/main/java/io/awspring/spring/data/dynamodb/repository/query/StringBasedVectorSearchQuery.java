@@ -35,17 +35,16 @@ public class StringBasedVectorSearchQuery extends AbstractVectorSearchQuery {
 
 	public StringBasedVectorSearchQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations,
 			ValueExpressionDelegate valueExpressionDelegate) {
-		super(queryMethod, operations);
+		super(queryMethod, operations, requiredAnnotation(queryMethod).topK());
 		Assert.notNull(valueExpressionDelegate, "valueExpressionDelegate must not be null");
-		VectorSearch annotation = queryMethod.getVectorSearchAnnotation();
-		Assert.state(annotation != null, () -> "Query method must have a @VectorSearch annotation: " + queryMethod);
 		this.valueExpressionDelegate = valueExpressionDelegate;
-		this.vectorSearch = annotation;
+		this.vectorSearch = requiredAnnotation(queryMethod);
 	}
 
-	@Override
-	protected int topK() {
-		return this.vectorSearch.topK();
+	private static VectorSearch requiredAnnotation(DynamoDbQueryMethod queryMethod) {
+		VectorSearch annotation = queryMethod.getVectorSearchAnnotation();
+		Assert.state(annotation != null, () -> "Query method must have a @VectorSearch annotation: " + queryMethod);
+		return annotation;
 	}
 
 	@Override

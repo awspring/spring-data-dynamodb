@@ -23,7 +23,7 @@ For a deep dive into the project, refer to the Spring Data DynamoDB documentatio
 - **Item-Collection Views**: Fold a partition's heterogeneous rows into one typed object via `@ItemCollectionView` and `ItemCollectionRepository`
 - **Sort Key Templates**: Compose and decompose sort keys from several properties
 - **Keyset Pagination**: `Window<T>` pagination backed by DynamoDB's `LastEvaluatedKey`
-- **Vector Search**: Similarity search over DynamoDB vector indexes via `@VectorIndex`, `VectorSearchRepository`, `@VectorQuery` and `@VectorSearch`
+- **Vector Search**: Similarity search over DynamoDB vector indexes via `@VectorIndex`, `@VectorQuery` and `@VectorSearch` on a `DynamoDbRepository`
 - **Optimistic Locking**: `@Version`-based conditional writes
 - **PartiQL**: Execute PartiQL statements from repository methods
 - **Template API**: `DynamoDbOperations` for work that does not fit a repository method

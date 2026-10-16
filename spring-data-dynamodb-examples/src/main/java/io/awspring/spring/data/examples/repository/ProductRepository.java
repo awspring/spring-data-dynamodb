@@ -30,6 +30,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ProductRepository extends DynamoDbRepository<Product, String> {
 
+	@VectorQuery(topK = 2)
+	List<Product> findTopTwoNearest(float[] queryVector);
+
 	@VectorQuery(topK = 3)
 	List<Product> findNearestInCategory(float[] queryVector, @Filter("category") String category);
 

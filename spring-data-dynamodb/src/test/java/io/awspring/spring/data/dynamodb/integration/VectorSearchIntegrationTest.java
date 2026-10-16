@@ -33,7 +33,6 @@ import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.Filter;
 import io.awspring.spring.data.dynamodb.repository.VectorQuery;
 import io.awspring.spring.data.dynamodb.repository.VectorSearch;
-import io.awspring.spring.data.dynamodb.repository.VectorSearchRepository;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
 import java.net.URI;
 import java.util.List;
@@ -69,7 +68,6 @@ public class VectorSearchIntegrationTest extends FlociTestContainer {
 
 	private AnnotationConfigApplicationContext context;
 	private DocRepository docs;
-	private DocSearchRepository search;
 
 	@Table(tableName = TABLE_NAME)
 	public static class Doc {
@@ -153,9 +151,9 @@ public class VectorSearchIntegrationTest extends FlociTestContainer {
 
 		@VectorQuery(topK = 500)
 		List<Doc> beyondTopKRange(float[] queryVector, @Filter("category") String category);
-	}
 
-	public interface DocSearchRepository extends VectorSearchRepository<Doc> {
+		@VectorQuery(topK = 3)
+		List<Doc> findNearest(float[] queryVector);
 	}
 
 	@EnableDynamoDbRepositories(basePackageClasses = VectorSearchIntegrationTest.class, considerNestedRepositories = true, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "io\\.awspring\\.spring\\.data\\.dynamodb\\.integration\\.(?!VectorSearchIntegrationTest\\$).*"))
@@ -188,7 +186,6 @@ public class VectorSearchIntegrationTest extends FlociTestContainer {
 		context.register(TestConfig.class);
 		context.refresh();
 		docs = context.getBean(DocRepository.class);
-		search = context.getBean(DocSearchRepository.class);
 
 		docs.saveAll(List.of(new Doc("d1", "audio", "acme", 1f, 0f, 0f), new Doc("d2", "audio", "zen", 0.9f, 0.1f, 0f),
 				new Doc("d3", "audio", "acme", 0f, 1f, 0f), new Doc("d4", "video", "acme", 1f, 0f, 0f)));
@@ -249,7 +246,7 @@ public class VectorSearchIntegrationTest extends FlociTestContainer {
 	@DisplayName("A search without the HASH key condition is rejected by DynamoDB, not by the library")
 	void searchWithoutHashKey_rejectedByService() {
 		UncategorizedDynamoDbException exception = assertThrows(UncategorizedDynamoDbException.class,
-				() -> search.searchNearest(QUERY_VECTOR, 3));
+				() -> docs.findNearest(QUERY_VECTOR));
 
 		assertTrue(exception.getMessage().contains("SearchConditionExpression must be provided"));
 	}

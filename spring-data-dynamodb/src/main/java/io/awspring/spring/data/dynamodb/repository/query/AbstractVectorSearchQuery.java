@@ -22,6 +22,8 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbVectorSearchRequest;
 import java.lang.reflect.Parameter;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -36,9 +38,12 @@ public abstract class AbstractVectorSearchQuery implements RepositoryQuery {
 	private final DynamoDbOperations operations;
 	private final Class<?> domainClass;
 	private final int vectorParameterIndex;
+	private final int limitParameterIndex;
+	private final int declaredTopK;
 	private final DynamoDbQueryExecution execution;
 
-	protected AbstractVectorSearchQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations) {
+	protected AbstractVectorSearchQuery(DynamoDbQueryMethod queryMethod, DynamoDbOperations operations,
+			int declaredTopK) {
 		Assert.notNull(queryMethod, "queryMethod must not be null");
 		Assert.notNull(operations, "operations must not be null");
 
@@ -46,7 +51,17 @@ public abstract class AbstractVectorSearchQuery implements RepositoryQuery {
 		this.operations = operations;
 		this.domainClass = queryMethod.getResultProcessor().getReturnedType().getDomainType();
 		this.vectorParameterIndex = vectorParameterIndex(queryMethod);
+		this.limitParameterIndex = queryMethod.getParameters().hasLimitParameter()
+				? queryMethod.getParameters().getLimitIndex()
+				: -1;
+		this.declaredTopK = declaredTopK;
 		this.execution = execution(queryMethod);
+
+		if (this.declaredTopK <= 0 && this.limitParameterIndex < 0) {
+			throw new InvalidDataAccessApiUsageException(
+					"A vector search method must declare topK on its annotation or accept a Limit parameter: "
+							+ queryMethod.getMethod());
+		}
 	}
 
 	@Override
@@ -59,7 +74,7 @@ public abstract class AbstractVectorSearchQuery implements RepositoryQuery {
 	@SuppressWarnings("unchecked")
 	public Object execute(Object[] parameters) {
 		DynamoDbVectorSearchRequest.Builder builder = DynamoDbVectorSearchRequest.request()
-				.withVector((float[]) parameters[this.vectorParameterIndex]).withTopK(topK());
+				.withVector((float[]) parameters[this.vectorParameterIndex]).withTopK(topK(parameters));
 		String indexName = indexName();
 		if (StringUtils.hasText(indexName)) {
 			builder.withIndexName(indexName);
@@ -71,7 +86,22 @@ public abstract class AbstractVectorSearchQuery implements RepositoryQuery {
 		return this.execution.execute(result);
 	}
 
-	protected abstract int topK();
+	/**
+	 * A limited {@link Limit} argument wins over the annotation's {@code topK}; an unlimited or {@code null} one falls
+	 * back to it. The value is sent as is: the service enforces its range.
+	 */
+	private int topK(Object[] parameters) {
+		if (this.limitParameterIndex >= 0 && parameters[this.limitParameterIndex] instanceof Limit limit
+				&& limit.isLimited()) {
+			return limit.max();
+		}
+		if (this.declaredTopK > 0) {
+			return this.declaredTopK;
+		}
+		throw new InvalidDataAccessApiUsageException(
+				"Vector search needs a limited Limit argument because its annotation declares no topK: "
+						+ this.queryMethod.getMethod());
+	}
 
 	protected abstract String indexName();
 
