@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionMember;
 import io.awspring.spring.data.dynamodb.core.mapping.ItemCollectionView;
@@ -34,6 +34,7 @@ import io.awspring.spring.data.dynamodb.repository.ExpressionName;
 import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -59,7 +60,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class ItemCollectionRepositoryIntegrationTest extends LocalStackTestContainer {
+public class ItemCollectionRepositoryIntegrationTest extends FlociTestContainer {
 
 	private static final String TABLE_NAME = "commerce";
 	private static final String CUSTOMER_PK = "CUSTOMER#1";
@@ -226,10 +227,9 @@ public class ItemCollectionRepositoryIntegrationTest extends LocalStackTestConta
 
 	@BeforeEach
 	void setUp() {
-		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		recreateTable();

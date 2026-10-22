@@ -22,11 +22,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.spring.data.dynamodb.core.DynamoDbTemplate;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
+import java.net.URI;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -48,7 +49,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class OptimisticLockingIntegrationTest extends LocalStackTestContainer {
+public class OptimisticLockingIntegrationTest extends FlociTestContainer {
 
 	private static final String TABLE_NAME = "optimistic_locking_test";
 	private static final String INITIAL_DATA = "initial data";
@@ -119,10 +120,9 @@ public class OptimisticLockingIntegrationTest extends LocalStackTestContainer {
 
 	@BeforeEach
 	void setUp() {
-		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		recreateTable();

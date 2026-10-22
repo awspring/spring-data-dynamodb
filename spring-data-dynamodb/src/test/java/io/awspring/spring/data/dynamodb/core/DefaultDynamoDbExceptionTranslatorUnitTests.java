@@ -32,6 +32,7 @@ import software.amazon.awssdk.services.dynamodb.model.ItemCollectionSizeLimitExc
 import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughputExceededException;
 import software.amazon.awssdk.services.dynamodb.model.RequestLimitExceededException;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.dynamodb.model.ThrottlingException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 
 @DisplayName("DefaultDynamoDbExceptionTranslator -- maps AWS SDK exceptions to Spring DataAccessExceptions")
@@ -79,6 +80,16 @@ class DefaultDynamoDbExceptionTranslatorUnitTests {
 
 		assertAll(() -> assertInstanceOf(TransientDataAccessResourceException.class, translated),
 				() -> assertInstanceOf(ProvisionedThroughputExceededException.class, translated.getCause()));
+	}
+
+	@Test
+	@DisplayName("ThrottlingException -> TransientDataAccessResourceException (cause preserved)")
+	void translate_throttling_becomesTransientResource() {
+		DataAccessException translated = translator
+				.translateExceptionIfPossible(ThrottlingException.builder().message("foo").build());
+
+		assertAll(() -> assertInstanceOf(TransientDataAccessResourceException.class, translated),
+				() -> assertInstanceOf(ThrottlingException.class, translated.getCause()));
 	}
 
 	@Test

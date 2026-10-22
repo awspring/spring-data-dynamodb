@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.config.AbstractDynamoDbConfiguration;
 import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
@@ -28,6 +28,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbCompositeId;
 import io.awspring.spring.data.dynamodb.repository.DynamoDbRepository;
 import io.awspring.spring.data.dynamodb.repository.config.EnableDynamoDbRepositories;
+import java.net.URI;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,7 +51,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContainer {
+public class CompositeIdRepositoryIntegrationTest extends FlociTestContainer {
 
 	private static final String SCALAR_TABLE = "composite_it_scalar";
 	private static final String COMPOSITE_TABLE = "composite_it_composite";
@@ -166,10 +167,9 @@ public class CompositeIdRepositoryIntegrationTest extends LocalStackTestContaine
 
 	@BeforeEach
 	void setUp() {
-		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		DynamoDbClient dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		recreateScalarTable(dynamoDbClient);

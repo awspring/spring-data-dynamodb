@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.core.DynamoDbTemplate;
 import io.awspring.spring.data.dynamodb.core.EntityQueryResult;
 import io.awspring.spring.data.dynamodb.core.converter.MappingDynamoDbConverter;
@@ -33,6 +33,7 @@ import io.awspring.spring.data.dynamodb.core.mapping.PartitionKey;
 import io.awspring.spring.data.dynamodb.core.mapping.SortKey;
 import io.awspring.spring.data.dynamodb.core.mapping.Table;
 import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughput;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
+public class GlobalSecondaryTemplateIndexTest extends FlociTestContainer {
 
 	private static final String TABLE_NAME = "arena_view";
 	private static final String GSI_NAME = "GSI1";
@@ -70,10 +71,9 @@ public class GlobalSecondaryTemplateIndexTest extends LocalStackTestContainer {
 
 	@BeforeEach
 	void setUp() {
-		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 
 		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();

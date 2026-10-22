@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.awspring.spring.data.dynamodb.LocalStackTestContainer;
+import io.awspring.spring.data.dynamodb.FlociTestContainer;
 import io.awspring.spring.data.dynamodb.core.DynamoDbTemplate;
 import io.awspring.spring.data.dynamodb.core.EntityQueryResult;
 import io.awspring.spring.data.dynamodb.core.EntityReadResult;
@@ -45,6 +45,7 @@ import io.awspring.spring.data.dynamodb.mapping.PlayerCardEntity;
 import io.awspring.spring.data.dynamodb.request.DynamoDbPageRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -76,7 +77,7 @@ import software.amazon.awssdk.services.dynamodb.model.ResourceInUseException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 
-public class DynamoDbTemplateTest extends LocalStackTestContainer {
+public class DynamoDbTemplateTest extends FlociTestContainer {
 
 	private static final String PLAYER_CARD_ENTITY_TABLE = "playerCardEntity";
 	private static final String PLAYER_CARD_TABLE = "playerCard";
@@ -95,10 +96,9 @@ public class DynamoDbTemplateTest extends LocalStackTestContainer {
 		DynamoDbMappingContext mappingContext = new DynamoDbMappingContext();
 		mappingDynamoDbConverter = new MappingDynamoDbConverter(mappingContext);
 		mappingDynamoDbConverter.afterPropertiesSet();
-		dynamoDbClient = DynamoDbClient.builder().region(Region.of(localstack.getRegion()))
-				.endpointOverride(localstack.getEndpoint())
-				.credentialsProvider(StaticCredentialsProvider
-						.create(AwsBasicCredentials.create(localstack.getAccessKey(), localstack.getSecretKey())))
+		dynamoDbClient = DynamoDbClient.builder().region(Region.of(floci.getRegion()))
+				.endpointOverride(URI.create(floci.getEndpoint())).credentialsProvider(StaticCredentialsProvider
+						.create(AwsBasicCredentials.create(floci.getAccessKey(), floci.getSecretKey())))
 				.build();
 		EntityCallbacks callbacks = EntityCallbacks.create();
 		callbacks.addEntityCallback((DynamoDbBeforeSaveCallback<Object>) (entity, tableName) -> {

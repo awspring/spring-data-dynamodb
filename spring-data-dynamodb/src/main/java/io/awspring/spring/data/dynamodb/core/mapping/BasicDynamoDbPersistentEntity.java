@@ -15,8 +15,10 @@
  */
 package io.awspring.spring.data.dynamodb.core.mapping;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.BeansException;
@@ -215,5 +217,28 @@ public class BasicDynamoDbPersistentEntity<T> extends BasicPersistentEntity<T, D
 			return null;
 		}
 		return StringUtils.hasText(annotation.indexName()) ? annotation.indexName() : null;
+	}
+
+	@Override
+	public List<VectorIndexMetadata> getVectorIndexes() {
+		List<VectorIndexMetadata> vectorIndexes = new ArrayList<>();
+		for (DynamoDbPersistentProperty property : this) {
+			VectorIndexMetadata vectorIndex = property.getVectorIndex();
+			if (vectorIndex != null) {
+				vectorIndexes.add(vectorIndex);
+			}
+		}
+		return List.copyOf(vectorIndexes);
+	}
+
+	@Override
+	@Nullable
+	public DynamoDbPersistentProperty getScoreProperty() {
+		for (DynamoDbPersistentProperty property : this) {
+			if (property.isScore()) {
+				return property;
+			}
+		}
+		return null;
 	}
 }

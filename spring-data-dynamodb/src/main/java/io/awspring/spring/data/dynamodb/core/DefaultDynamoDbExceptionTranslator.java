@@ -31,6 +31,7 @@ import software.amazon.awssdk.services.dynamodb.model.ItemCollectionSizeLimitExc
 import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughputExceededException;
 import software.amazon.awssdk.services.dynamodb.model.RequestLimitExceededException;
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.dynamodb.model.ThrottlingException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 
 /**
@@ -67,7 +68,7 @@ public class DefaultDynamoDbExceptionTranslator implements DynamoDbExceptionTran
 			return new ConcurrencyFailureException(message, ex);
 		}
 
-		if (ex instanceof ProvisionedThroughputExceededException
+		if (ex instanceof ProvisionedThroughputExceededException || ex instanceof ThrottlingException
 				|| ex instanceof ItemCollectionSizeLimitExceededException) {
 			return new TransientDataAccessResourceException(message, ex);
 		}

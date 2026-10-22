@@ -23,6 +23,8 @@ import io.awspring.spring.data.dynamodb.repository.ItemCollectionRepository;
 import io.awspring.spring.data.dynamodb.repository.Query;
 import io.awspring.spring.data.dynamodb.repository.SecondaryIndexRepository;
 import io.awspring.spring.data.dynamodb.repository.Update;
+import io.awspring.spring.data.dynamodb.repository.VectorQuery;
+import io.awspring.spring.data.dynamodb.repository.VectorSearch;
 import java.lang.reflect.Method;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -49,6 +51,8 @@ public class DynamoDbQueryMethod extends QueryMethod {
 	private final MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext;
 	private final @Nullable Query query;
 	private final @Nullable Update update;
+	private final @Nullable VectorQuery vectorQuery;
+	private final @Nullable VectorSearch vectorSearch;
 	private final boolean allowScan;
 
 	private @Nullable PartTree partTree;
@@ -63,6 +67,8 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		this.mappingContext = mappingContext;
 		this.query = AnnotatedElementUtils.findMergedAnnotation(method, Query.class);
 		this.update = AnnotatedElementUtils.findMergedAnnotation(method, Update.class);
+		this.vectorQuery = AnnotatedElementUtils.findMergedAnnotation(method, VectorQuery.class);
+		this.vectorSearch = AnnotatedElementUtils.findMergedAnnotation(method, VectorSearch.class);
 		this.allowScan = AnnotatedElementUtils.hasAnnotation(method, AllowScan.class)
 				|| (this.query != null && this.query.allowScan());
 
@@ -222,6 +228,28 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		return this.update;
 	}
 
+	public boolean hasVectorQuery() {
+		return this.vectorQuery != null;
+	}
+
+	@Nullable
+	public VectorQuery getVectorQueryAnnotation() {
+		return this.vectorQuery;
+	}
+
+	public boolean hasVectorSearch() {
+		return this.vectorSearch != null;
+	}
+
+	@Nullable
+	public VectorSearch getVectorSearchAnnotation() {
+		return this.vectorSearch;
+	}
+
+	public Method getMethod() {
+		return this.method;
+	}
+
 	public boolean allowsScan() {
 		return this.allowScan;
 	}
@@ -263,7 +291,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 	@Nullable
 	private PartTree partTree() {
 
-		if (this.query != null || this.update != null) {
+		if (this.query != null || this.update != null || this.vectorQuery != null || this.vectorSearch != null) {
 			return null;
 		}
 		if (this.partTree == null) {

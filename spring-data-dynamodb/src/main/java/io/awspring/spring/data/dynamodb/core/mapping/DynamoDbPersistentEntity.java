@@ -15,6 +15,7 @@
  */
 package io.awspring.spring.data.dynamodb.core.mapping;
 
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.mapping.PersistentEntity;
 
@@ -43,4 +44,9 @@ public interface DynamoDbPersistentEntity<T> extends PersistentEntity<T, DynamoD
 
 	@Nullable
 	String getItemCollectionIndexName();
+
+	List<VectorIndexMetadata> getVectorIndexes();
+
+	@Nullable
+	DynamoDbPersistentProperty getScoreProperty();
 }

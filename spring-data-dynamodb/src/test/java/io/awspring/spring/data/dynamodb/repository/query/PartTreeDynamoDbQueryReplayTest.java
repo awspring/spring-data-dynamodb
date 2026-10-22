@@ -40,6 +40,7 @@ import io.awspring.spring.data.dynamodb.request.DynamoDbQueryRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbScanRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequest;
 import io.awspring.spring.data.dynamodb.request.DynamoDbUpdateExpressionRequestInterface;
+import io.awspring.spring.data.dynamodb.request.DynamoDbVectorSearchRequest;
 import io.awspring.spring.data.dynamodb.request.IndexQueryBuilder;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
@@ -190,6 +191,11 @@ class PartTreeDynamoDbQueryReplayTest {
 
 		@Override
 		public <T> long count(Class<T> entityClass) {
+			throw new UnsupportedOperationException("not exercised by this test");
+		}
+
+		@Override
+		public <T> EntityQueryResult<List<T>> searchVectors(Class<T> entityClass, DynamoDbVectorSearchRequest request) {
 			throw new UnsupportedOperationException("not exercised by this test");
 		}
 

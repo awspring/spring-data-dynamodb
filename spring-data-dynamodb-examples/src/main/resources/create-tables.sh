@@ -4,7 +4,7 @@ set -e
 ENDPOINT="http://localhost:4566"
 REGION="eu-central-1"
 
-echo "Creating 'Commerce' table via LocalStack in $REGION..."
+echo "Creating 'Commerce' table via Floci in $REGION..."
 
 curl -s -X POST "$ENDPOINT" \
   -H "Content-Type: application/x-amz-json-1.0" \
@@ -48,6 +48,39 @@ curl -s -X POST "$ENDPOINT" \
       "ReadCapacityUnits": 5,
       "WriteCapacityUnits": 5
     }
+  }'
+
+echo ""
+echo "Creating on-demand 'Products' table with vector index 'ProductEmbeddingIndex' in $REGION..."
+
+curl -s -X POST "$ENDPOINT" \
+  -H "Content-Type: application/x-amz-json-1.0" \
+  -H "X-Amz-Target: DynamoDB_20120810.CreateTable" \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=test/$(date -u +%Y%m%d)/$REGION/dynamodb/aws4_request" \
+  -d '{
+    "TableName": "Products",
+    "BillingMode": "PAY_PER_REQUEST",
+    "AttributeDefinitions": [
+      {"AttributeName": "productId", "AttributeType": "S"},
+      {"AttributeName": "category",  "AttributeType": "S"},
+      {"AttributeName": "brand",     "AttributeType": "S"}
+    ],
+    "KeySchema": [
+      {"AttributeName": "productId", "KeyType": "HASH"}
+    ],
+    "VectorIndexes": [
+      {
+        "IndexName": "ProductEmbeddingIndex",
+        "VectorAttribute": {"AttributeName": "embedding"},
+        "Dimensions": 3,
+        "DistanceFunction": "COSINE",
+        "Projection": {"ProjectionType": "ALL"},
+        "SearchSchema": [
+          {"AttributeName": "category", "SearchSchemaElementType": "INLINE_FILTER"},
+          {"AttributeName": "brand",    "SearchSchemaElementType": "INLINE_FILTER"}
+        ]
+      }
+    ]
   }'
 
 echo ""
