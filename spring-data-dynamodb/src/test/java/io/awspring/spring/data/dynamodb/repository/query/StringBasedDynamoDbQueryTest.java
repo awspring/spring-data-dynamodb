@@ -232,7 +232,10 @@ class StringBasedDynamoDbQueryTest {
 		@Test
 		@DisplayName("@Query(indexName=...) on a base DynamoDbRepository is rejected at bootstrap")
 		void indexNameOnBaseRepositoryRejectedAtBootstrap() throws NoSuchMethodException {
-			interface WidgetCrudRepository extends DynamoDbRepository<Widget,String>{@Query(keyConditionExpression="pk = :pk",indexName=INDEX_NAME)List<Widget>byIndex(@Param("pk")String pk);}
+			interface WidgetCrudRepository extends DynamoDbRepository<Widget, String> {
+				@Query(keyConditionExpression = "pk = :pk", indexName = INDEX_NAME)
+				List<Widget> byIndex(@Param("pk") String pk);
+			}
 
 			Method method = WidgetCrudRepository.class.getMethod("byIndex", String.class);
 			RepositoryMetadata metadata = new DefaultRepositoryMetadata(WidgetCrudRepository.class);

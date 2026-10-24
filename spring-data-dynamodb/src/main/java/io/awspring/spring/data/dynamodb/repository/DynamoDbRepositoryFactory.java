@@ -108,73 +108,74 @@ public class DynamoDbRepositoryFactory extends RepositoryFactorySupport {
 			MappingContext<? extends DynamoDbPersistentEntity<?>, DynamoDbPersistentProperty> mappingContext,
 			Key lookupStrategyKey) implements QueryLookupStrategy {
 
-	@Override
-	public RepositoryQuery resolveQuery(Method method, RepositoryMetadata metadata, ProjectionFactory factory,
-			NamedQueries namedQueries) {
+		@Override
+		public RepositoryQuery resolveQuery(Method method, RepositoryMetadata metadata, ProjectionFactory factory,
+				NamedQueries namedQueries) {
 
-		DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, factory, mappingContext);
-		String namedQueryName = queryMethod.getNamedQueryName();
+			DynamoDbQueryMethod queryMethod = new DynamoDbQueryMethod(method, metadata, factory, mappingContext);
+			String namedQueryName = queryMethod.getNamedQueryName();
 
-		if (queryMethod.hasVectorSearch()) {
-			return new StringBasedVectorSearchQuery(queryMethod, operations, valueExpressionDelegate);
-		}
-		if (queryMethod.hasVectorQuery()) {
-			return new VectorSearchQuery(queryMethod, operations);
-		}
+			if (queryMethod.hasVectorSearch()) {
+				return new StringBasedVectorSearchQuery(queryMethod, operations, valueExpressionDelegate);
+			}
+			if (queryMethod.hasVectorQuery()) {
+				return new VectorSearchQuery(queryMethod, operations);
+			}
 
-		boolean useDeclaredQueries = lookupStrategyKey != Key.CREATE;
-		if (queryMethod.isUpdateQuery()) {
+			boolean useDeclaredQueries = lookupStrategyKey != Key.CREATE;
+			if (queryMethod.isUpdateQuery()) {
+				if (useDeclaredQueries && namedQueries.hasQuery(namedQueryName)) {
+					throw new InvalidDataAccessApiUsageException(
+							"Named DynamoDB queries are read-only expressions and cannot be combined with @Update. "
+									+ "Remove the named query property for method: " + method);
+				}
+				return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
+			}
+
 			if (useDeclaredQueries && namedQueries.hasQuery(namedQueryName)) {
-				throw new InvalidDataAccessApiUsageException(
-						"Named DynamoDB queries are read-only expressions and cannot be combined with @Update. "
-								+ "Remove the named query property for method: " + method);
-			}
-			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
-		}
-
-		if (useDeclaredQueries && namedQueries.hasQuery(namedQueryName)) {
-			String namedQueryString = namedQueries.getQuery(namedQueryName);
-			if (isItemCollectionRepository(metadata)) {
-				return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate,
-						namedQueryString);
-			}
-			verifyScanAllowed(queryMethod, method);
-			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate, namedQueryString);
-		}
-
-		if (useDeclaredQueries && queryMethod.hasAnnotatedQuery()) {
-			if (isItemCollectionRepository(metadata)) {
-				return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate);
-			}
-			Query query = queryMethod.getQueryAnnotation();
-			if (query != null && !queryMethod.isPartiQlQuery() && query.keyConditionExpression().isBlank()
-					&& !query.filterExpression().isBlank()) {
+				String namedQueryString = namedQueries.getQuery(namedQueryName);
+				if (isItemCollectionRepository(metadata)) {
+					return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate,
+							namedQueryString);
+				}
 				verifyScanAllowed(queryMethod, method);
+				return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate, namedQueryString);
 			}
-			return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
+
+			if (useDeclaredQueries && queryMethod.hasAnnotatedQuery()) {
+				if (isItemCollectionRepository(metadata)) {
+					return new StringBasedItemCollectionQuery(queryMethod, operations, valueExpressionDelegate);
+				}
+				Query query = queryMethod.getQueryAnnotation();
+				if (query != null && !queryMethod.isPartiQlQuery() && query.keyConditionExpression().isBlank()
+						&& !query.filterExpression().isBlank()) {
+					verifyScanAllowed(queryMethod, method);
+				}
+				return new StringBasedDynamoDbQuery(queryMethod, operations, valueExpressionDelegate);
+			}
+
+			if (lookupStrategyKey == Key.USE_DECLARED_QUERY) {
+				throw new InvalidDataAccessApiUsageException("No declared DynamoDB query found for " + method
+						+ ". Configure a named query, annotate the method with @Query or @Update, "
+						+ "or use CREATE_IF_NOT_FOUND to allow derived queries.");
+			}
+
+			if (isItemCollectionRepository(metadata)) {
+				throw new InvalidDataAccessApiUsageException(
+						"ItemCollectionRepository does not support PartTree (derived) query methods; an item-collection view class "
+								+ "exposes no key properties to bind to. Use @Query(keyConditionExpression=...) or one "
+								+ "of the fixed base methods (findByPartitionKey, findByPartitionKeyAndSortKey, etc.). "
+								+ "Method: " + method);
+			}
+
+			return new PartTreeDynamoDbQuery(queryMethod, operations);
 		}
 
-		if (lookupStrategyKey == Key.USE_DECLARED_QUERY) {
-			throw new InvalidDataAccessApiUsageException("No declared DynamoDB query found for " + method
-					+ ". Configure a named query, annotate the method with @Query or @Update, "
-					+ "or use CREATE_IF_NOT_FOUND to allow derived queries.");
+		private static void verifyScanAllowed(DynamoDbQueryMethod queryMethod, Method method) {
+			if (!queryMethod.allowsScan()) {
+				throw new InvalidDataAccessApiUsageException("Declared query method " + method
+						+ " requires a Scan but is not annotated @AllowScan and does not set @Query(allowScan=true).");
+			}
 		}
-
-		if (isItemCollectionRepository(metadata)) {
-			throw new InvalidDataAccessApiUsageException(
-					"ItemCollectionRepository does not support PartTree (derived) query methods; an item-collection view class "
-							+ "exposes no key properties to bind to. Use @Query(keyConditionExpression=...) or one "
-							+ "of the fixed base methods (findByPartitionKey, findByPartitionKeyAndSortKey, etc.). "
-							+ "Method: " + method);
-		}
-
-		return new PartTreeDynamoDbQuery(queryMethod, operations);
 	}
-
-	private static void verifyScanAllowed(DynamoDbQueryMethod queryMethod, Method method) {
-		if (!queryMethod.allowsScan()) {
-			throw new InvalidDataAccessApiUsageException("Declared query method " + method
-					+ " requires a Scan but is not annotated @AllowScan and does not set @Query(allowScan=true).");
-		}
-	}
-}}
+}

@@ -22,9 +22,8 @@
 		<maven.deploy.skip>true</maven.deploy.skip>
 		<maven.install.skip>true</maven.install.skip>
 
-		<asciidoctor-maven-plugin.version>3.0.0</asciidoctor-maven-plugin.version>
+		<asciidoctor-maven-plugin.version>3.2.0</asciidoctor-maven-plugin.version>
 		<spring-asciidoctor-backends.version>0.0.7</spring-asciidoctor-backends.version>
-		<asciidoctorj.version>2.5.13</asciidoctorj.version>
 
 		<refdocs.build.directory>${project.build.directory}/refdocs</refdocs.build.directory>
 		<generated-docs.dir>${project.build.directory}/generated-docs</generated-docs.dir>

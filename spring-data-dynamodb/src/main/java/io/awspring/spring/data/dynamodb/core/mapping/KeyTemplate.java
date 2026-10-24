@@ -43,6 +43,7 @@ public final class KeyTemplate {
 		static Segment literal(String text) {
 			return new Segment(true, text);
 		}
+
 		static Segment placeholder(String name) {
 			return new Segment(false, name);
 		}

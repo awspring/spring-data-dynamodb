@@ -352,17 +352,17 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 		values.put(valueSlot, value);
 
 		String text = switch (op) {
-			case GT -> namePlaceholder + " > " + valueSlot;
-			case GE -> namePlaceholder + " >= " + valueSlot;
-			case LT -> namePlaceholder + " < " + valueSlot;
-			case LE -> namePlaceholder + " <= " + valueSlot;
-			case BEGINS_WITH -> "begins_with(" + namePlaceholder + ", " + valueSlot + ")";
-			case BETWEEN -> {
-				String endSlot = valueSlot + "_1";
-				values.put(endSlot, rangeEnd);
-				yield namePlaceholder + " BETWEEN " + valueSlot + " AND " + endSlot;
-			}
-			case EQ -> namePlaceholder + " = " + valueSlot;
+		case GT -> namePlaceholder + " > " + valueSlot;
+		case GE -> namePlaceholder + " >= " + valueSlot;
+		case LT -> namePlaceholder + " < " + valueSlot;
+		case LE -> namePlaceholder + " <= " + valueSlot;
+		case BEGINS_WITH -> "begins_with(" + namePlaceholder + ", " + valueSlot + ")";
+		case BETWEEN -> {
+			String endSlot = valueSlot + "_1";
+			values.put(endSlot, rangeEnd);
+			yield namePlaceholder + " BETWEEN " + valueSlot + " AND " + endSlot;
+		}
+		case EQ -> namePlaceholder + " = " + valueSlot;
 		};
 
 		return new PendingSortRange(columnName, op, value, rangeEnd, new FixedFragment(text, names, values));
@@ -400,39 +400,36 @@ public class DynamoDbQueryCreator extends AbstractQueryCreator<DynamoDbQuerySpec
 		placeholderIndex++;
 
 		return switch (part.getType()) {
-			case SIMPLE_PROPERTY -> namePlaceholder + " = " + nextValuePlaceholder(valueSlot, parameters, target);
-			case NEGATING_SIMPLE_PROPERTY ->
-					namePlaceholder + " <> " + nextValuePlaceholder(valueSlot, parameters, target);
-			case GREATER_THAN, AFTER -> namePlaceholder + " > " + nextValuePlaceholder(valueSlot, parameters, target);
-			case GREATER_THAN_EQUAL -> namePlaceholder + " >= " + nextValuePlaceholder(valueSlot, parameters, target);
-			case LESS_THAN, BEFORE -> namePlaceholder + " < " + nextValuePlaceholder(valueSlot, parameters, target);
-			case LESS_THAN_EQUAL -> namePlaceholder + " <= " + nextValuePlaceholder(valueSlot, parameters, target);
-			case BETWEEN -> {
-				String start = nextValuePlaceholder(valueSlot, parameters, target);
-				String end = nextValuePlaceholder(valueSlot, parameters, target);
-				yield namePlaceholder + " BETWEEN " + start + " AND " + end;
-			}
-			case STARTING_WITH -> "begins_with(" + namePlaceholder + ", "
-					+ nextValuePlaceholder(valueSlot, parameters, target) + ")";
-			case CONTAINING ->
-					"contains(" + namePlaceholder + ", " + nextValuePlaceholder(valueSlot, parameters, target) + ")";
-			case NOT_CONTAINING -> "NOT contains(" + namePlaceholder + ", "
-					+ nextValuePlaceholder(valueSlot, parameters, target) + ")";
-			case IN -> inFragment(namePlaceholder, valueSlot, parameters, target, false);
-			case NOT_IN -> inFragment(namePlaceholder, valueSlot, parameters, target, true);
-			case TRUE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "true", Boolean.TRUE, target);
-			case FALSE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "false", Boolean.FALSE, target);
-			case IS_NULL -> "attribute_not_exists(" + namePlaceholder + ")";
-			case IS_NOT_NULL -> "attribute_exists(" + namePlaceholder + ")";
-			case IS_EMPTY, IS_NOT_EMPTY ->
-					throw reject(part, "size()/empty checks have no DynamoDB filter-expression equivalent");
+		case SIMPLE_PROPERTY -> namePlaceholder + " = " + nextValuePlaceholder(valueSlot, parameters, target);
+		case NEGATING_SIMPLE_PROPERTY -> namePlaceholder + " <> " + nextValuePlaceholder(valueSlot, parameters, target);
+		case GREATER_THAN, AFTER -> namePlaceholder + " > " + nextValuePlaceholder(valueSlot, parameters, target);
+		case GREATER_THAN_EQUAL -> namePlaceholder + " >= " + nextValuePlaceholder(valueSlot, parameters, target);
+		case LESS_THAN, BEFORE -> namePlaceholder + " < " + nextValuePlaceholder(valueSlot, parameters, target);
+		case LESS_THAN_EQUAL -> namePlaceholder + " <= " + nextValuePlaceholder(valueSlot, parameters, target);
+		case BETWEEN -> {
+			String start = nextValuePlaceholder(valueSlot, parameters, target);
+			String end = nextValuePlaceholder(valueSlot, parameters, target);
+			yield namePlaceholder + " BETWEEN " + start + " AND " + end;
+		}
+		case STARTING_WITH ->
+			"begins_with(" + namePlaceholder + ", " + nextValuePlaceholder(valueSlot, parameters, target) + ")";
+		case CONTAINING ->
+			"contains(" + namePlaceholder + ", " + nextValuePlaceholder(valueSlot, parameters, target) + ")";
+		case NOT_CONTAINING ->
+			"NOT contains(" + namePlaceholder + ", " + nextValuePlaceholder(valueSlot, parameters, target) + ")";
+		case IN -> inFragment(namePlaceholder, valueSlot, parameters, target, false);
+		case NOT_IN -> inFragment(namePlaceholder, valueSlot, parameters, target, true);
+		case TRUE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "true", Boolean.TRUE, target);
+		case FALSE -> namePlaceholder + " = " + literalPlaceholder(valueSlot, "false", Boolean.FALSE, target);
+		case IS_NULL -> "attribute_not_exists(" + namePlaceholder + ")";
+		case IS_NOT_NULL -> "attribute_exists(" + namePlaceholder + ")";
+		case IS_EMPTY, IS_NOT_EMPTY ->
+			throw reject(part, "size()/empty checks have no DynamoDB filter-expression equivalent");
 
-			case ENDING_WITH, REGEX, LIKE, NOT_LIKE ->
-					throw reject(part, "no DynamoDB filter-expression equivalent");
-			case NEAR, WITHIN ->
-					throw reject(part, "not a meaningful construct for DynamoDB");
+		case ENDING_WITH, REGEX, LIKE, NOT_LIKE -> throw reject(part, "no DynamoDB filter-expression equivalent");
+		case NEAR, WITHIN -> throw reject(part, "not a meaningful construct for DynamoDB");
 
-			default -> throw reject(part, "not yet classified in this skeleton");
+		default -> throw reject(part, "not yet classified in this skeleton");
 		};
 	}
 

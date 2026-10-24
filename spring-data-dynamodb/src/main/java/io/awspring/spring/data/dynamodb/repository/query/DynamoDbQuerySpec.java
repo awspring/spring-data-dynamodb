@@ -160,7 +160,9 @@ public final class DynamoDbQuerySpec {
 	}
 
 	public record SortCondition(String columnName, Op op, Object value, @Nullable Object rangeEnd) {
-		public enum Op{EQ,LT,LE,GT,GE,BETWEEN,BEGINS_WITH}
+		public enum Op {
+			EQ, LT, LE, GT, GE, BETWEEN, BEGINS_WITH
+		}
 	}
 
 	public DynamoDbScanRequest toScanRequest() {

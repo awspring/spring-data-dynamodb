@@ -76,7 +76,7 @@ class ItemCollectionRepositoryFactoryTest {
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private static <M extends DynamoDbPersistentEntity<?>> void stubMappingContext(DynamoDbConverter converter,
-                                                                                   MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
+			MappingContext<M, DynamoDbPersistentProperty> mappingContext) {
 		when(converter.getMappingContext()).thenReturn((MappingContext) mappingContext);
 	}
 
