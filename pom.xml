@@ -8,12 +8,12 @@
 	<parent>
 		<groupId>org.springframework.data.build</groupId>
 		<artifactId>spring-data-parent</artifactId>
-		<version>4.1.0</version>
+		<version>4.1.2</version>
 	</parent>
 
 	<groupId>io.awspring.cloud</groupId>
 	<artifactId>spring-data-dynamodb-parent</artifactId>
-	<version>1.0.0-ALPHA</version>
+	<version>1.0.0</version>
 	<packaging>pom</packaging>
 
 	<name>Spring Data DynamoDB</name>
