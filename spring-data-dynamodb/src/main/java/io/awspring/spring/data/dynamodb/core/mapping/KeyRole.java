@@ -19,10 +19,10 @@ package io.awspring.spring.data.dynamodb.core.mapping;
  * @author Matej Nedic
  * @since 1.0.0
  */
-public record KeyRole(KeyRole.KeyType keyType,int order){
+public record KeyRole(KeyRole.KeyType keyType, int order) {
 
-public enum KeyType {
-	PARTITION, SORT
+	public enum KeyType {
+		PARTITION, SORT
 
 	}
 

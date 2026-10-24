@@ -206,10 +206,8 @@ class StringBasedItemCollectionQueryTest {
 			verify(operations).queryItemCollection(eq(OrderItemCollection.class), captor.capture(),
 					any(DynamoDbPageRequest.class));
 			DynamoDbQueryRequest request = captor.getValue();
-			assertAll(
-					() -> assertEquals("#status = :status", request.getFilterExpression()),
-					() -> assertEquals(STATUS_PLACED,
-							request.getExpressionAttributeValues().get(":status")));
+			assertAll(() -> assertEquals("#status = :status", request.getFilterExpression()),
+					() -> assertEquals(STATUS_PLACED, request.getExpressionAttributeValues().get(":status")));
 		}
 
 		@Test
@@ -276,8 +274,7 @@ class StringBasedItemCollectionQueryTest {
 			verify(operations).queryItemCollection(eq(OrderItemCollection.class), captor.capture(),
 					any(DynamoDbPageRequest.class));
 			DynamoDbQueryRequest request = captor.getValue();
-			assertAll(
-					() -> assertEquals("GSI1", request.getIndexName()),
+			assertAll(() -> assertEquals("GSI1", request.getIndexName()),
 					() -> assertEquals("gsi1pk", request.getExpressionAttributeNames().get("#pk")));
 		}
 	}
@@ -289,7 +286,9 @@ class StringBasedItemCollectionQueryTest {
 		@Test
 		@DisplayName("non-annotated non-base method fails fast on view repo")
 		void nonAnnotatedNonBaseMethodFailsFastOnItemCollectionRepo() {
-			interface BadRepo extends ItemCollectionRepository<OrderItemCollection>{OrderItemCollection findByNothing(String something);}
+			interface BadRepo extends ItemCollectionRepository<OrderItemCollection> {
+				OrderItemCollection findByNothing(String something);
+			}
 
 			assertThrows(InvalidDataAccessApiUsageException.class, () -> factory.getRepository(BadRepo.class));
 		}
@@ -297,7 +296,10 @@ class StringBasedItemCollectionQueryTest {
 		@Test
 		@DisplayName("@Update on an view repository is rejected at bootstrap")
 		void updateMethodFailsFastOnItemCollectionRepo() {
-			interface UpdateItemCollectionRepo extends ItemCollectionRepository<OrderItemCollection>{@Update(updateExpression="SET #status = :status",names=@ExpressionName(name="#status",value="status"))void touch(@Param("pk")String pk,@Param("sk")String sk,@Param("status")String status);}
+			interface UpdateItemCollectionRepo extends ItemCollectionRepository<OrderItemCollection> {
+				@Update(updateExpression = "SET #status = :status", names = @ExpressionName(name = "#status", value = "status"))
+				void touch(@Param("pk") String pk, @Param("sk") String sk, @Param("status") String status);
+			}
 
 			assertThrows(InvalidDataAccessApiUsageException.class,
 					() -> factory.getRepository(UpdateItemCollectionRepo.class));
@@ -365,8 +367,7 @@ class StringBasedItemCollectionQueryTest {
 			OrderItemCollectionRepository repo = factory.getRepository(OrderItemCollectionRepository.class);
 
 			// Act & Assert
-			assertThrows(org.springframework.dao.EmptyResultDataAccessException.class,
-					() -> repo.loadFromGsi("PK"));
+			assertThrows(org.springframework.dao.EmptyResultDataAccessException.class, () -> repo.loadFromGsi("PK"));
 		}
 	}
 }

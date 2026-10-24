@@ -23,10 +23,9 @@ import org.jspecify.annotations.Nullable;
  * @since 1.0.0
  */
 public record IndexKeySchema(List<DynamoDbPersistentProperty> partitionKeys,
-							 List<DynamoDbPersistentProperty> sortKeys) {
+		List<DynamoDbPersistentProperty> sortKeys) {
 
-	public IndexKeySchema(List<DynamoDbPersistentProperty> partitionKeys,
-						  List<DynamoDbPersistentProperty> sortKeys) {
+	public IndexKeySchema(List<DynamoDbPersistentProperty> partitionKeys, List<DynamoDbPersistentProperty> sortKeys) {
 		this.partitionKeys = List.copyOf(partitionKeys);
 		this.sortKeys = List.copyOf(sortKeys);
 	}

@@ -184,7 +184,7 @@ public class DynamoDbQueryMethod extends QueryMethod {
 		if (!isCountQuery() && !isExistsQuery() && !isUpdateQuery()
 				&& getResultProcessor().getReturnedType().isProjecting()) {
 			throw new InvalidDataAccessApiUsageException(
-					"DTO / interface projections are not supported in this alpha. Declare the query method to return "
+					"DTO / interface projections are not supported. Declare the query method to return "
 							+ "its entity type (optionally wrapped in Optional, List, Window or Slice). Method: "
 							+ method);
 		}

@@ -34,14 +34,15 @@ public interface DynamoDbQueryExecution {
 
 	record CollectionExecution() implements DynamoDbQueryExecution {
 
-	@Override
+		@Override
 		public Object execute(EntityQueryResult<List<Object>> result) {
 			return result.getEntity();
-		}}
+		}
+	}
 
 	record SingleEntityExecution(boolean limiting) implements DynamoDbQueryExecution {
 
-	@Override
+		@Override
 		@Nullable
 		public Object execute(EntityQueryResult<List<Object>> result) {
 			List<Object> items = result.getEntity();
@@ -52,17 +53,16 @@ public interface DynamoDbQueryExecution {
 				throw new IncorrectResultSizeDataAccessException(1, items.size());
 			}
 			return items.get(0);
-		}}
+		}
+	}
 
 	record WindowExecution() implements DynamoDbQueryExecution {
 
-	@Override
+		@Override
 		public Object execute(EntityQueryResult<List<Object>> result) {
 			Map<String, Object> lastEvaluatedKey = result.getLastEvaluatedKey();
 			boolean hasNext = lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty();
-			ScrollPosition nextPosition = hasNext
-					? ScrollPosition.forward(lastEvaluatedKey)
-					: ScrollPosition.keyset();
+			ScrollPosition nextPosition = hasNext ? ScrollPosition.forward(lastEvaluatedKey) : ScrollPosition.keyset();
 
 			List<Object> items = result.getEntity();
 			int lastIndex = items.size() - 1;
@@ -77,4 +77,5 @@ public interface DynamoDbQueryExecution {
 				return nextPosition;
 			}, hasNext);
 		}
-}}
+	}
+}
